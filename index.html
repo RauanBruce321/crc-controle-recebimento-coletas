@@ -362,9 +362,30 @@ function chooseNewestLocalState(){
  return bTime>pTime?backup:primary;
 }
 let state=chooseNewestLocalState();
+function normalizeDockNumber(value){
+ const raw=String(value??'').trim();
+ if(!raw)return '';
+ return /^\d+$/.test(raw)?raw.padStart(2,'0'):raw.toUpperCase();
+}
+function uniqueDocks(docks=[]){
+ const map=new Map();
+ const rank={Livre:1,Bloqueada:2,Ocupada:3};
+ (Array.isArray(docks)?docks:[]).forEach((dock,index)=>{
+  if(!dock||typeof dock!=='object')return;
+  const number=normalizeDockNumber(dock.number);
+  if(!number)return;
+  const item={...dock,id:dock.id||`dock-${number}`,number,status:['Livre','Bloqueada','Ocupada'].includes(dock.status)?dock.status:'Livre'};
+  const previous=map.get(number);
+  if(!previous){map.set(number,item);return}
+  const preferred=(rank[item.status]||0)>(rank[previous.status]||0)?item:previous;
+  map.set(number,{...previous,...item,id:previous.id||item.id,status:preferred.status});
+ });
+ return [...map.values()].sort((a,b)=>a.number.localeCompare(b.number,undefined,{numeric:true}));
+}
 function normalizeStateShape(target){
  target=target&&typeof target==='object'?target:seed();
  ['users','typologies','plan','drivers','docks','active','history','priorities','logs','turns'].forEach(k=>{if(!Array.isArray(target[k]))target[k]=[]});
+ target.docks=uniqueDocks(target.docks);
  target.meta=target.meta||{createdAt:nowISO(),updatedAt:nowISO(),revision:0};
  target.settings=target.settings||{};
  return target;
@@ -535,12 +556,14 @@ function showLogin(){
  const u=$('#loginUser'),p=$('#loginPass');if(u)u.value='';if(p)p.value='';
 }
 function dockPanel(){
+ const docks=uniqueDocks(state.docks);
  return `<div class="panel"><div class="panel-title"><h3>Farol das docas</h3><span class="small">Livre • Ocupada • Bloqueada</span></div><div class="dock-grid">${
-  state.docks.sort((a,b)=>a.number.localeCompare(b.number)).map(d=>{const a=state.active.find(x=>x.dock===d.number);const priorityClass=a?.priority?' priority':'';return `<div class="dock ${d.status==='Livre'?'free':d.status==='Ocupada'?'busy':'blocked'}${priorityClass}"><strong>Doca ${esc(d.number)}${a?.priority?' • 🚨 PRIORIDADE':''}</strong><small>${esc(d.status)}</small>${a?`<small>${esc(a.driverName)} • ${esc(a.typology)}</small><small>${esc(a.operation)}</small>`:''}</div>`}).join('')
+  docks.map(d=>{const a=state.active.find(x=>normalizeDockNumber(x.dock)===d.number);const priorityClass=a?.priority?' priority':'';return `<div class="dock ${d.status==='Livre'?'free':d.status==='Ocupada'?'busy':'blocked'}${priorityClass}"><strong>Doca ${esc(d.number)}${a?.priority?' • 🚨 PRIORIDADE':''}</strong><small>${esc(d.status)}</small>${a?`<small>${esc(a.driverName)} • ${esc(a.typology)}</small><small>${esc(a.operation)}</small>`:''}</div>`}).join('')
  }</div></div>`;
 }
 function performanceTable(){
- const rows=state.docks.map(d=>{const h=state.history.filter(x=>x.dock===d.number);const avg=h.length?Math.round(h.reduce((a,b)=>a+b.durationMin,0)/h.length):0;const vol=h.reduce((a,b)=>a+b.receivedVolumes,0);const prod=h.length?vol/Math.max(1,h.reduce((a,b)=>a+b.durationMin,0)):0;return {dock:d.number,count:h.length,avg,prod}}).sort((a,b)=>b.count-a.count);
+ const docks=uniqueDocks(state.docks);
+ const rows=docks.map(d=>{const h=state.history.filter(x=>normalizeDockNumber(x.dock)===d.number);const avg=h.length?Math.round(h.reduce((a,b)=>a+Number(b.durationMin||0),0)/h.length):0;const vol=h.reduce((a,b)=>a+Number(b.receivedVolumes||0),0);const prod=h.length?vol/Math.max(1,h.reduce((a,b)=>a+Number(b.durationMin||0),0)):0;return {dock:d.number,count:h.length,avg,prod}}).sort((a,b)=>b.count-a.count||a.dock.localeCompare(b.dock,undefined,{numeric:true}));
  return `<div class="panel"><div class="panel-title"><h3>Desempenho das docas</h3><span class="small">Produção do histórico atual</span></div><div class="table-wrap"><table><thead><tr><th>Doca</th><th>Veículos</th><th>Tempo médio</th><th>Volumes/min</th></tr></thead><tbody>${rows.map(r=>`<tr><td>Doca ${r.dock}</td><td>${r.count}</td><td>${r.avg||'—'}${r.avg?' min':''}</td><td>${r.prod?r.prod.toFixed(2):'—'}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 function renderDashboard(){
@@ -903,7 +926,7 @@ function mergeStates(local,remote){
  merged.active=merged.active.filter(a=>!completedIds.has(a.id));
  merged.history=merged.history.filter(h=>!archivedIds.has(h.id));
  const occupied=new Set(merged.active.map(a=>a.dock));
- merged.docks=merged.docks.map(d=>({...d,status:occupied.has(d.number)?'Ocupada':(d.status==='Ocupada'?'Livre':d.status)}));
+ merged.docks=uniqueDocks(merged.docks).map(d=>({...d,status:occupied.has(d.number)?'Ocupada':(d.status==='Ocupada'?'Livre':d.status)}));
  merged.version='9.0';merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
  return normalizeStateShape(merged);
 }
