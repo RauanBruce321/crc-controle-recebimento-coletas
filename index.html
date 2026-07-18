@@ -439,10 +439,41 @@ function saveDeferred(sync=true){
 }
 function refreshUI(){if(session)render()}
 
-let uiEditing=0;document.addEventListener('focusin',e=>{if(e.target.closest('form')||['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))uiEditing=Date.now();});document.addEventListener('input',()=>uiEditing=Date.now(),true);document.addEventListener('change',()=>uiEditing=Date.now(),true);function isEditingUI(){return document.activeElement&&(['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName))&&(Date.now()-uiEditing<300000);}
+let uiEditing=0;
+let receivingOperationLocked=false;
+let pendingIncomingState=null;
+function lockReceivingOperation(reason='form'){
+ if(currentPage!=='receiving')return;
+ receivingOperationLocked=true;
+ receivingOperationLockedAt=Date.now();
+ console.log('CRC: atualização visual bloqueada durante início do descarregamento:',reason);
+}
+let receivingOperationLockedAt=0;
+function unlockReceivingOperation({applyPending=true,refresh=true}={}){
+ receivingOperationLocked=false;
+ receivingOperationLockedAt=0;
+ if(applyPending&&pendingIncomingState){
+  const localSettings={...(state.settings||{})};
+  state=mergeStates(state,pendingIncomingState);
+  state.settings={...(state.settings||{}),supabaseUrl:localSettings.supabaseUrl||state.settings?.supabaseUrl||'',supabaseKey:localSettings.supabaseKey||'',supabaseEnabled:localSettings.supabaseEnabled??state.settings?.supabaseEnabled??false};
+  pendingIncomingState=null;
+  persistLocalSnapshot();
+ }
+ if(refresh)refreshUI();
+}
+function isReceivingOperationLocked(){return receivingOperationLocked&&currentPage==='receiving';}
+document.addEventListener('focusin',e=>{if(e.target.closest('form')||['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))uiEditing=Date.now();});
+document.addEventListener('input',()=>uiEditing=Date.now(),true);
+document.addEventListener('change',()=>uiEditing=Date.now(),true);
+function isEditingUI(){return document.activeElement&&(['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName))&&(Date.now()-uiEditing<300000);}
 function applyIncomingState(incoming,force=false){
  if(!incoming||typeof incoming!=='object')return false;
  if(!force&&!shouldApplyIncoming(incoming))return false;
+ if(isReceivingOperationLocked()){
+  pendingIncomingState=incoming;
+  console.log('CRC: dados recebidos do Supabase e mantidos em espera até iniciar o descarregamento.');
+  return true;
+ }
  const localSettings={...(state.settings||{})};
  state=incoming;state.settings={...(incoming.settings||{}),supabaseUrl:localSettings.supabaseUrl||incoming.settings?.supabaseUrl||'',supabaseKey:localSettings.supabaseKey||'',supabaseEnabled:localSettings.supabaseEnabled??incoming.settings?.supabaseEnabled??false};
  persistLocalSnapshot();if(isEditingUI()&&force){console.log('CRC: sincronização adiada durante edição');return true;}refreshUI();return true;
@@ -464,7 +495,7 @@ const navItems=[
 ];
 function renderNav(){
   $('#mainNav').innerHTML=navItems.filter(x=>isVisible(x[0])).map(([id,ic,tx])=>`<button data-page="${id}" class="${currentPage===id?'active':''}"><span class="nav-icon">${ic}</span><span class="nav-text">${tx}</span></button>`).join('');
-  $('#mainNav').onclick=e=>{const b=e.target.closest('button[data-page]');if(b){currentPage=b.dataset.page;render()}};
+  $('#mainNav').onclick=e=>{const b=e.target.closest('button[data-page]');if(b){const nextPage=b.dataset.page;if(currentPage==='receiving'&&nextPage!=='receiving'&&receivingOperationLocked)unlockReceivingOperation({applyPending:true,refresh:false});currentPage=nextPage;render()}};
 }
 function stats(){
   const plannedV=state.plan.reduce((a,b)=>a+Number(b.vehicles||0),0), plannedVol=state.plan.reduce((a,b)=>a+Number(b.volumes||0),0);
@@ -600,7 +631,13 @@ function renderLogs(){return pageHead('Histórico do Sistema','Entradas, lançam
 
 function bindPage(){
   $('#tvBtn')?.addEventListener('click',()=>document.body.classList.toggle('tv-mode'));
-  $('#startForm')?.addEventListener('submit',startReceiving);$('#openStartCameraBtn')?.addEventListener('click',()=>openCamera('start'));$('#driverSelect')?.addEventListener('change',e=>{const d=state.drivers.find(x=>x.id===e.target.value);$('#driverPlateView').value=d?.plate||'';$('#driverHorseView').value=d?.horse||'';$('#driverTypView').value=d?.typology||''});
+  const startForm=$('#startForm');
+  startForm?.addEventListener('submit',startReceiving);
+  startForm?.addEventListener('input',()=>lockReceivingOperation('preenchimento'),true);
+  startForm?.addEventListener('change',()=>lockReceivingOperation('seleção'),true);
+  startForm?.addEventListener('focusin',()=>lockReceivingOperation('formulário'),true);
+  $('#openStartCameraBtn')?.addEventListener('click',()=>{lockReceivingOperation('câmera');openCamera('start')});
+  $('#driverSelect')?.addEventListener('change',e=>{const d=state.drivers.find(x=>x.id===e.target.value);$('#driverPlateView').value=d?.plate||'';$('#driverHorseView').value=d?.horse||'';$('#driverTypView').value=d?.typology||''});
   $$('.finalize-btn').forEach(b=>b.onclick=()=>openFinish(b.dataset.id));
   $$('.view-start-photo').forEach(b=>b.onclick=()=>showActivePhoto(b.dataset.id));
   $('#planForm')?.addEventListener('submit',addPlan);
@@ -638,7 +675,7 @@ async function startReceiving(e){
   const dockRow=state.docks.find(d=>d.number===dock);if(dockRow)dockRow.status='Ocupada';
   log('Iniciou descarregamento',`${driver.name} • Doca ${dock} • HC ${hc}`,false);
   save(false);
-  refreshUI();
+  unlockReceivingOperation({applyPending:true,refresh:true});
   if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),300)}
   toast('Descarregamento iniciado e salvo.','ok');
  }catch(err){
@@ -757,6 +794,7 @@ function applyCapturedPhoto(data){
  }else closeModal();
 }
 function openDeviceCameraFallback(){
+ if(cameraTarget==='start')lockReceivingOperation('câmera do aparelho');
  const input=document.createElement('input');
  input.type='file';input.accept='image/*';input.setAttribute('capture','environment');input.style.display='none';
  input.onchange=async()=>{
@@ -766,6 +804,7 @@ function openDeviceCameraFallback(){
  document.body.appendChild(input);input.click();
 }
 async function openCamera(target){
+ if(target==='start')lockReceivingOperation('câmera');
  cameraTarget=target;
  $('#modalBox').innerHTML=`<div class="modal-head"><h3>Capturar foto</h3><button class="close" id="closeCameraBtn">✕</button></div><div class="camera-stage"><video id="cameraVideo" autoplay playsinline muted></video></div><div id="cameraStatus" class="camera-status">Abrindo câmera...</div><div class="camera-actions"><button class="btn btn-primary" id="captureCameraBtn" type="button">📷 Capturar</button><button class="btn btn-soft" id="switchCameraBtn" type="button">Alternar câmera</button><button class="btn btn-soft" id="deviceCameraBtn" type="button">📱 Usar câmera do aparelho</button></div>`;
  $('#modal').classList.remove('hidden');$('#closeCameraBtn').onclick=closeModal;let facing='environment';
