@@ -438,12 +438,14 @@ function saveDeferred(sync=true){
  saveDeferred._t=setTimeout(()=>save(sync),0);
 }
 function refreshUI(){if(session)render()}
+
+let uiEditing=0;document.addEventListener('focusin',e=>{if(e.target.closest('form')||['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))uiEditing=Date.now();});document.addEventListener('input',()=>uiEditing=Date.now(),true);document.addEventListener('change',()=>uiEditing=Date.now(),true);function isEditingUI(){return document.activeElement&&(['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName))&&(Date.now()-uiEditing<300000);}
 function applyIncomingState(incoming,force=false){
  if(!incoming||typeof incoming!=='object')return false;
  if(!force&&!shouldApplyIncoming(incoming))return false;
  const localSettings={...(state.settings||{})};
  state=incoming;state.settings={...(incoming.settings||{}),supabaseUrl:localSettings.supabaseUrl||incoming.settings?.supabaseUrl||'',supabaseKey:localSettings.supabaseKey||'',supabaseEnabled:localSettings.supabaseEnabled??incoming.settings?.supabaseEnabled??false};
- persistLocalSnapshot();refreshUI();return true;
+ persistLocalSnapshot();if(isEditingUI()&&force){console.log('CRC: sincronização adiada durante edição');return true;}refreshUI();return true;
 }
 function log(action,detail='',persist=true){if(session)state.logs.unshift({id:uid(),at:nowISO(),user:session.name,role:session.role,operation:session.operation,action,detail});if(persist)save(false)}
 function toast(msg,type='',duration=7000){
