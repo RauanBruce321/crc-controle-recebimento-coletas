@@ -1092,7 +1092,7 @@ async function startCRC(){
  render();bindThemeButton();setTimeout(()=>$('#crcSplash')?.classList.add('hide'),450);
  timerLoop=setInterval(()=>{updateTimers();checkTimeAlerts()},1000);
  priorityLoop=setInterval(priorityReminder,15000);
- setInterval(()=>{if(!syncInFlight&&!isEditingUI()&&!isReceivingOperationLocked())pullCloud(false)},300000);
+ setInterval(()=>{if(!syncInFlight&&!isEditingUI()&&!isReceivingOperationLocked())pullCloud(false)},1500);
 }
 startCRC();
 </script>
