@@ -575,7 +575,7 @@ function isReceivingOperationLocked(){return receivingOperationLocked&&currentPa
 document.addEventListener('focusin',e=>{if(e.target.closest('form')||['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))uiEditing=Date.now();});
 document.addEventListener('input',()=>uiEditing=Date.now(),true);
 document.addEventListener('change',()=>uiEditing=Date.now(),true);
-function isEditingUI(){return document.activeElement&&(['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName))&&(Date.now()-uiEditing<900);}
+function isEditingUI(){return !!(document.activeElement&&['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName));}
 document.addEventListener('focusout',()=>scheduleVisualRefresh(180),true);
 function applyIncomingState(incoming,force=false){
  if(!incoming||typeof incoming!=='object')return false;
@@ -661,8 +661,25 @@ function performanceTable(){
  const rows=docks.map(d=>{const h=state.history.filter(x=>normalizeDockNumber(x.dock)===d.number);const avg=h.length?Math.round(h.reduce((a,b)=>a+Number(b.durationMin||0),0)/h.length):0;const vol=h.reduce((a,b)=>a+Number(b.receivedVolumes||0),0);const prod=h.length?vol/Math.max(1,h.reduce((a,b)=>a+Number(b.durationMin||0),0)):0;return {dock:d.number,count:h.length,avg,prod}}).sort((a,b)=>b.count-a.count||a.dock.localeCompare(b.dock,undefined,{numeric:true}));
  return `<div class="panel"><div class="panel-title"><h3>Desempenho das docas</h3><span class="small">Produção do histórico atual</span></div><div class="table-wrap"><table><thead><tr><th>Doca</th><th>Veículos</th><th>Tempo médio</th><th>Volumes/min</th></tr></thead><tbody>${rows.map(r=>`<tr><td>Doca ${r.dock}</td><td>${r.count}</td><td>${r.avg||'—'}${r.avg?' min':''}</td><td>${r.prod?r.prod.toFixed(2):'—'}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
+function localDateKey(value){
+ const d=value?new Date(value):new Date();
+ if(!Number.isFinite(d.getTime()))return String(value||'').slice(0,10);
+ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function noShowPanel(){
+ const today=localDateKey();
+ const names=[...new Set([...state.typologies.map(t=>t.name),...state.plan.filter(p=>p.date===today).map(p=>p.typology)])];
+ const rows=names.map(name=>{
+  const planned=state.plan.filter(p=>p.date===today&&p.typology===name).reduce((sum,p)=>sum+Number(p.vehicles||0),0);
+  const completed=state.history.filter(h=>h.typology===name&&localDateKey(h.finishedAt)===today).length;
+  const noShow=Math.max(0,planned-completed);
+  const pct=planned?Math.round(noShow/planned*100):0;
+  return {name,planned,completed,noShow,pct};
+ }).filter(r=>r.planned>0||r.completed>0);
+ return `<div class="panel no-show-panel"><div class="panel-title"><h3>No-show de veículos por tipologia — hoje</h3><span class="small">Atualizado conforme previsão e finalizações do dia</span></div><div class="table-wrap"><table><thead><tr><th>Tipologia</th><th>Previsto</th><th>Concluído</th><th>No-show</th><th>% No-show</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td><b>${esc(r.name)}</b></td><td>${r.planned}</td><td>${r.completed}</td><td>${r.noShow}</td><td><span class="badge ${r.pct>0?'badge-red':'badge-green'}">${r.pct}%</span></td></tr>`).join(''):`<tr><td colspan="5" class="small">Nenhuma previsão lançada para hoje.</td></tr>`}</tbody></table></div></div>`;
+}
 function renderDashboard(){
- return pageHead('Painel Geral','Visão consolidada de todas as operações.') + kpis()+`<div class="grid-2">${dockPanel()}${performanceTable()}</div>`+activeCards(false);
+ return pageHead('Painel Geral','Visão consolidada de todas as operações.') + kpis()+`<div class="grid-2">${dockPanel()}${performanceTable()}</div>`+activeCards(false)+noShowPanel();
 }
 function alerts(){
  const out=[];const t=Date.now();
@@ -681,7 +698,7 @@ function renderReceiving(){
  return pageHead('Recebimento Operacional','Selecione o motorista, confirme a doca, registre a foto e inicie a descarga.')+
  `<div class="receiving-priority-strip"><div class="cards"><div class="kpi priority-kpi"><small>Prioridades</small><strong>${waitingPriorities().length}</strong><em>aguardando</em></div>${priorityCards()}</div></div><div class="panel"><div class="panel-title"><h3>Iniciar descarregamento</h3><span class="small">A doca fica bloqueada até a finalização</span></div>
  <form id="startForm"><div class="receiving-form-grid">
- <div class="span2"><label>Motorista</label><select id="driverSelect" required><option value="">Selecione...</option>${state.drivers.filter(d=>d.status==='Ativo'&&!state.active.some(a=>a.driverId===d.id)).sort((a,b)=>{const ap=waitingPriorities().some(p=>p.driverId===a.id),bp=waitingPriorities().some(p=>p.driverId===b.id);return Number(bp)-Number(ap)||a.name.localeCompare(b.name)}).map(d=>{const pr=waitingPriorities().find(p=>p.driverId===d.id);return `<option value="${d.id}">${pr?'🚨 PRIORIDADE — ':''}${esc(d.name)}</option>`}).join('')}</select></div>
+ <div class="span2"><label>Motorista</label><input id="driverSearch" type="search" placeholder="Pesquisar nome do motorista..." autocomplete="off"><select id="driverSelect" required style="margin-top:8px"><option value="">Selecione...</option>${state.drivers.filter(d=>d.status==='Ativo'&&!state.active.some(a=>a.driverId===d.id)).sort((a,b)=>{const ap=waitingPriorities().some(p=>p.driverId===a.id),bp=waitingPriorities().some(p=>p.driverId===b.id);return Number(bp)-Number(ap)||a.name.localeCompare(b.name)}).map(d=>{const pr=waitingPriorities().find(p=>p.driverId===d.id);return `<option value="${d.id}" data-search="${esc((d.name+' '+d.plate+' '+d.typology).toLowerCase())}">${pr?'🚨 PRIORIDADE — ':''}${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`}).join('')}</select></div>
  <div><label>Placa</label><input id="driverPlateView" class="readonly-field" readonly placeholder="Automático"></div>
  <div><label>Cavalo</label><input id="driverHorseView" class="readonly-field" readonly placeholder="Automático"></div>
  <div><label>Tipologia</label><input id="driverTypView" class="readonly-field" readonly placeholder="Automático"></div>
@@ -709,7 +726,7 @@ function renderPlanning(){
  <div><label>Peso previsto</label><input id="planWeight" type="number" min="0" step="0.01" required></div>
  <div style="align-self:end"><button class="btn btn-primary" type="submit">Adicionar previsão</button></div>
  </div></form></div>
- <div class="panel"><div class="panel-title"><h3>Previsão lançada</h3><span class="small">Dados de demonstração já incluídos</span></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipologia</th><th>Veículos</th><th>Volumes</th><th>Peso</th><th>Média por carro</th><th>Ação</th></tr></thead><tbody>${state.plan.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.typology)}</td><td>${p.vehicles}</td><td>${p.volumes.toLocaleString('pt-BR')}</td><td>${Number(p.weight).toLocaleString('pt-BR')}</td><td>${Math.round(p.volumes/p.vehicles)}</td><td><button class="btn btn-danger delete-plan" data-id="${p.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>`;
+ <div class="panel"><div class="panel-title"><h3>Previsão lançada</h3><span class="small">Dados de demonstração já incluídos</span></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipologia</th><th>Veículos</th><th>Volumes</th><th>Peso</th><th>Média por carro</th><th>Ação</th></tr></thead><tbody>${state.plan.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.typology)}</td><td>${p.vehicles}</td><td>${p.volumes.toLocaleString('pt-BR')}</td><td>${Number(p.weight).toLocaleString('pt-BR')}</td><td>${Math.round(p.volumes/p.vehicles)}</td><td><button class="btn btn-danger delete-plan" data-id="${p.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>`+noShowPanel();
 }
 function renderPriorities(){
  const available=state.drivers.filter(d=>d.status==='Ativo').sort((a,b)=>a.name.localeCompare(b.name));
@@ -752,6 +769,8 @@ function bindPage(){
   setTimeout(()=>{const awb=$('#awbInput, input[name=awb], input[data-awb]');if(awb){awb.setAttribute('inputmode','none');awb.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();awb.form?.requestSubmit?.();setTimeout(()=>{awb.value='';awb.focus()},80)}})}},0);
   const startForm=$('#startForm');
   startForm?.addEventListener('submit',startReceiving);
+  const driverSearch=$('#driverSearch'),driverSelect=$('#driverSelect');
+  if(driverSearch&&driverSelect){driverSearch.addEventListener('input',()=>{const q=driverSearch.value.trim().toLowerCase();[...driverSelect.options].forEach((o,i)=>{if(i===0)return;o.hidden=!!q&&!((o.dataset.search||o.textContent.toLowerCase()).includes(q))});const visible=[...driverSelect.options].filter((o,i)=>i>0&&!o.hidden);if(q&&visible.length===1){driverSelect.value=visible[0].value;driverSelect.dispatchEvent(new Event('change'))}})}
   startForm?.addEventListener('input',()=>lockReceivingOperation('preenchimento'),true);
   startForm?.addEventListener('change',()=>lockReceivingOperation('seleção'),true);
   startForm?.addEventListener('focusin',()=>lockReceivingOperation('formulário'),true);
@@ -885,7 +904,7 @@ function openAccessSetup(user){
     session={id:user.id,name:operator,accountName:user.name,role:user.role,operation};
     sessionStorage.setItem(SESSION,JSON.stringify(session));localStorage.setItem(SESSION_PERSIST,JSON.stringify(session));
     currentPage=user.role==='receiving'?'receiving':'dashboard';closeModal();$('#loginScreen').classList.add('hidden');$('#app').classList.remove('hidden');resetInactivity();
-    requestAnimationFrame(()=>{render();log('Entrou no sistema',needsOperation?session.operation:'Acesso geral');});
+    requestAnimationFrame(async()=>{render();await startCloudSession({pull:true});log('Entrou no sistema',needsOperation?session.operation:'Acesso geral');});
   };
 }
 
@@ -952,7 +971,7 @@ async function openCamera(target){
 function checkTimeAlerts(){const t=Date.now();let changed=false;state.active.forEach(a=>{const pct=((t-new Date(a.startedAt))/60000)/Math.max(1,a.targetMin);if(pct>=.5&&!a.alert50){toast(`Doca ${a.dock} • ${a.driverName} • 50% do tempo utilizado.`,'attention',7000);a.alert50=true;changed=true}if(pct>=.8&&!a.alert80){toast(`Doca ${a.dock} • ${a.driverName} • faltam poucos minutos para o limite.`,'warning',8000);a.alert80=true;changed=true}if(pct>=1&&!a.alert100){toast(`Doca ${a.dock} • ${a.driverName} • tempo limite atingido.`,'overtime',9000);a.alert100=true;a.lastOvertimeAlert=t;changed=true}else if(pct>=1&&(!a.lastOvertimeAlert||t-a.lastOvertimeAlert>=300000)){toast(`Doca ${a.dock} • ${a.driverName} • descarregamento acima do tempo.`,'overtime',9000);a.lastOvertimeAlert=t;changed=true}});if(changed)save(false)}
 let inactivityTimer=null,warningTimer=null;
 function resetInactivity(){clearTimeout(inactivityTimer);clearTimeout(warningTimer);if(session){warningTimer=setTimeout(()=>toast('A sessão será encerrada em 30 segundos por inatividade.','warning',10000),570000);inactivityTimer=setTimeout(()=>logoutNow('Sessão encerrada após 10 minutos sem atividade.'),600000)}}
-function logoutNow(reason=''){try{if(session)log(reason||'Saiu do sistema');persistLocalSnapshot()}catch(e){}sessionStorage.removeItem(SESSION);localStorage.removeItem(SESSION_PERSIST);session=null;clearTimeout(inactivityTimer);clearTimeout(warningTimer);showLogin();if(reason)toast(reason,'error',7000)}
+function logoutNow(reason=''){try{if(session)log(reason||'Saiu do sistema');persistLocalSnapshot()}catch(e){}stopCloudSession();sessionStorage.removeItem(SESSION);localStorage.removeItem(SESSION_PERSIST);session=null;clearTimeout(inactivityTimer);clearTimeout(warningTimer);showLogin();if(reason)toast(reason,'error',7000)}
 ['click','keydown','mousemove','touchstart','scroll'].forEach(ev=>document.addEventListener(ev,resetInactivity,{passive:true}));
 
 function closeModal(){if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null}$('#modal').classList.add('hidden');$('#modalBox').innerHTML=''}
@@ -1021,8 +1040,21 @@ function initSupabase(){
   return supabaseClient;
  }catch(e){supabaseClient=null;console.error('CRC: falha ao iniciar Supabase.',e);return null}
 }
-function scheduleCloudPull(delay=80){clearTimeout(cloudPullTimer);cloudPullTimer=setTimeout(()=>{if(syncInFlight){scheduleCloudPull(180);return}pullCloud(true)},delay)}
+function cloudSessionAllowed(){return !!session&&document.visibilityState==='visible'&&navigator.onLine;}
+function stopCloudSession(){
+ clearTimeout(cloudPullTimer);
+ try{if(supabaseChannel&&supabaseClient)supabaseClient.removeChannel(supabaseChannel)}catch(e){}
+ supabaseChannel=null;
+}
+async function startCloudSession({pull=true}={}){
+ if(!cloudSessionAllowed())return false;
+ initSupabase();initRealtime();
+ if(pull)return await pullCloud(true);
+ return true;
+}
+function scheduleCloudPull(delay=80){if(!cloudSessionAllowed())return;clearTimeout(cloudPullTimer);cloudPullTimer=setTimeout(()=>{if(!cloudSessionAllowed())return;if(syncInFlight){scheduleCloudPull(180);return}pullCloud(true)},delay)}
 function initRealtime(){
+ if(!cloudSessionAllowed())return;
  initSupabase();if(!supabaseClient)return;
  try{if(supabaseChannel)supabaseClient.removeChannel(supabaseChannel)}catch(e){}
  supabaseChannel=supabaseClient.channel('crc-live-v104',{config:{broadcast:{self:false}}})
@@ -1031,6 +1063,7 @@ function initRealtime(){
   .subscribe(status=>{if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')setTimeout(initRealtime,1600)});
 }
 async function pullCloud(force=false){
+ if(!cloudSessionAllowed())return false;
  initSupabase();if(!supabaseClient)return false;
  let lastError=null;
  for(let attempt=0;attempt<3;attempt++){
@@ -1051,6 +1084,7 @@ async function pullCloud(force=false){
  return false;
 }
 async function syncCloud(silent=false){
+ if(!cloudSessionAllowed()){syncQueued=true;return false}
  initSupabase();if(!supabaseClient){if(!silent)toast('Supabase indisponível.','error');return false}
  if(syncInFlight){syncQueued=true;return true}
  syncInFlight=true;
@@ -1127,16 +1161,22 @@ const THEME_KEY='crc_v10_theme';
 function applyCRCTheme(mode){const dark=mode==='dark';document.body.classList.toggle('crc-dark',dark);localStorage.setItem(THEME_KEY,dark?'dark':'light');const b=$('#themeToggleBtn');if(b){b.textContent=dark?'☀️':'🌙';b.title=dark?'Usar tema claro':'Usar tema escuro'}}
 function bindThemeButton(){const b=$('#themeToggleBtn');if(b&&!b.dataset.bound){b.dataset.bound='1';b.onclick=()=>applyCRCTheme(document.body.classList.contains('crc-dark')?'light':'dark')}applyCRCTheme(localStorage.getItem(THEME_KEY)||'light')}
 
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='hidden')stopCloudSession();
+ else if(session&&navigator.onLine)startCloudSession({pull:true});
+});
+window.addEventListener('offline',stopCloudSession);
+window.addEventListener('online',()=>{if(session&&document.visibilityState==='visible')startCloudSession({pull:true})});
+
 async function startCRC(){
  persistLocalSnapshot();
- initSupabase();
- initRealtime();
- await pullCloud(true);
+ if(session&&document.visibilityState==='visible'&&navigator.onLine)await startCloudSession({pull:true});
  lastAppliedCloudFingerprint=cloudFingerprint(state);
  render();bindThemeButton();setTimeout(()=>$('#crcSplash')?.classList.add('hide'),450);
  timerLoop=setInterval(()=>{updateTimers();checkTimeAlerts()},1000);
  priorityLoop=setInterval(priorityReminder,15000);
- setInterval(()=>{if(!syncInFlight&&!isReceivingOperationLocked()&&Date.now()-lastLocalMutationAt>1500)pullCloud(false)},4000);
+ // Realtime é a fonte principal. A consulta abaixo é apenas uma segurança eventual.
+ setInterval(()=>{if(cloudSessionAllowed()&&!syncInFlight&&!isReceivingOperationLocked()&&Date.now()-lastLocalMutationAt>3000)pullCloud(false)},60000);
 }
 startCRC();
 // CRC V10.5: prioridade persistente, Realtime forçado por evento, PWA alinhado ao CCPB e retry silencioso do Supabase.
