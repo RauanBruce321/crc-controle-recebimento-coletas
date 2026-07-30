@@ -670,13 +670,115 @@ function noShowPanel(){
  const today=localDateKey();
  const names=[...new Set([...state.typologies.map(t=>t.name),...state.plan.filter(p=>p.date===today).map(p=>p.typology)])];
  const rows=names.map(name=>{
+
+  // Veículos
   const planned=state.plan.filter(p=>p.date===today&&p.typology===name).reduce((sum,p)=>sum+Number(p.vehicles||0),0);
   const completed=state.history.filter(h=>h.typology===name&&localDateKey(h.finishedAt)===today).length;
   const noShow=Math.max(0,planned-completed);
   const pct=planned?Math.round(noShow/planned*100):0;
-  return {name,planned,completed,noShow,pct};
- }).filter(r=>r.planned>0||r.completed>0);
- return `<div class="panel no-show-panel"><div class="panel-title"><h3>No-show de veículos por tipologia — hoje</h3><span class="small">Atualizado conforme previsão e finalizações do dia</span></div><div class="table-wrap"><table><thead><tr><th>Tipologia</th><th>Previsto</th><th>Concluído</th><th>No-show</th><th>% No-show</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td><b>${esc(r.name)}</b></td><td>${r.planned}</td><td>${r.completed}</td><td>${r.noShow}</td><td><span class="badge ${r.pct>0?'badge-red':'badge-green'}">${r.pct}%</span></td></tr>`).join(''):`<tr><td colspan="5" class="small">Nenhuma previsão lançada para hoje.</td></tr>`}</tbody></table></div></div>`;
+
+  // VLS
+  const plannedVls=state.plan.filter(p=>p.date===today&&p.typology===name).reduce((sum,p)=>sum+Number(p.volumes||0),0);
+
+  const receivedVls=state.history
+   .filter(h=>h.typology===name&&localDateKey(h.finishedAt)===today)
+   .reduce((sum,h)=>sum+Number(h.receivedVolumes||h.volumes||0),0);
+
+  const noShowVls=Math.max(0,plannedVls-receivedVls);
+
+  const pctVls=plannedVls
+   ?Math.round(noShowVls/plannedVls*100)
+   :0;
+
+  return {
+   name,
+   planned,
+   completed,
+   noShow,
+   pct,
+   plannedVls,
+   receivedVls,
+   noShowVls,
+   pctVls
+  };
+
+ }).filter(r=>r.planned>0||r.completed>0||r.plannedVls>0||r.receivedVls>0);
+
+ return `<div class="panel no-show-panel">
+ <div class="panel-title">
+ <h3>No-show por tipologia — hoje</h3>
+ <span class="small">Atualizado conforme previsão e finalizações do dia</span>
+ </div>
+
+ <div class="table-wrap">
+ <table>
+
+ <thead>
+
+ <tr>
+ <th>Tipologia</th>
+ <th>Previsto</th>
+ <th>Concluído</th>
+ <th>No-show</th>
+ <th>% No-show</th>
+ <th>VLS Prev.</th>
+ <th>VLS Rec.</th>
+ <th>VLS No-show</th>
+ <th>% VLS</th>
+ </tr>
+
+ </thead>
+
+ <tbody>
+
+ ${
+ rows.length
+
+ ?rows.map(r=>`
+
+ <tr>
+
+ <td><b>${esc(r.name)}</b></td>
+
+ <td>${r.planned}</td>
+
+ <td>${r.completed}</td>
+
+ <td>${r.noShow}</td>
+
+ <td>
+ <span class="badge ${r.pct>0?'badge-red':'badge-green'}">
+ ${r.pct}%
+ </span>
+ </td>
+
+ <td>${r.plannedVls.toLocaleString('pt-BR')}</td>
+
+ <td>${r.receivedVls.toLocaleString('pt-BR')}</td>
+
+ <td>${r.noShowVls.toLocaleString('pt-BR')}</td>
+
+ <td>
+ <span class="badge ${r.pctVls>0?'badge-red':'badge-green'}">
+ ${r.pctVls}%
+ </span>
+ </td>
+
+ </tr>
+
+ `).join('')
+
+ :`<tr><td colspan="9" class="small">Nenhuma previsão lançada para hoje.</td></tr>`
+
+ }
+
+ </tbody>
+
+ </table>
+
+ </div>
+
+ </div>`;
 }
 function renderDashboard(){
  return pageHead('Painel Geral','Visão consolidada de todas as operações.') + kpis()+`<div class="grid-2">${dockPanel()}${performanceTable()}</div>`+activeCards(false)+noShowPanel();
@@ -771,7 +873,7 @@ function bindPage(){
   startForm?.addEventListener('submit',startReceiving);
   const driverSearch=$('#driverSearch'),driverSelect=$('#driverSelect');
   if(driverSearch&&driverSelect){driverSearch.addEventListener('input',()=>{const q=driverSearch.value.trim().toLowerCase();[...driverSelect.options].forEach((o,i)=>{if(i===0)return;o.hidden=!!q&&!((o.dataset.search||o.textContent.toLowerCase()).includes(q))});const visible=[...driverSelect.options].filter((o,i)=>i>0&&!o.hidden);if(q&&visible.length===1){driverSelect.value=visible[0].value;driverSelect.dispatchEvent(new Event('change'))}})}
-  startForm?.addEventListener('input',()=>lockReceivingOperation('preenchimento'),true);
+    startForm?.addEventListener('input',()=>lockReceivingOperation('preenchimento'),true);
   startForm?.addEventListener('change',()=>lockReceivingOperation('seleção'),true);
   startForm?.addEventListener('focusin',()=>lockReceivingOperation('formulário'),true);
   $('#openStartCameraBtn')?.addEventListener('click',()=>{lockReceivingOperation('câmera');openCamera('start')});
@@ -779,7 +881,21 @@ function bindPage(){
   $$('.finalize-btn').forEach(b=>b.onclick=()=>openFinish(b.dataset.id));
   $$('.view-start-photo').forEach(b=>b.onclick=()=>showActivePhoto(b.dataset.id));
   $('#planForm')?.addEventListener('submit',addPlan);
-  $$('.delete-plan').forEach(b=>b.onclick=()=>{state.plan=state.plan.filter(x=>x.id!==b.dataset.id);log('Excluiu previsão',b.dataset.id,false);save(true);render()});
+
+  $$('.delete-plan').forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.id;
+
+    if(!confirm('Deseja realmente excluir esta previsão?')) return;
+
+    state.plan=state.plan.filter(x=>x.id!==id);
+
+    log('Excluiu previsão',id,false);
+
+    await save(true);
+
+    render();
+  });
+
   $('#priorityForm')?.addEventListener('submit',addPriority);$('#prioDriver')?.addEventListener('change',refreshPriorityDriverFields);refreshPriorityDriverFields();$$('.cancel-priority').forEach(b=>b.onclick=()=>{const p=state.priorities.find(x=>x.id===b.dataset.id);if(!p)return;p.status='Cancelada';p.cancelledAt=nowISO();p.updatedAt=nowISO();log('Cancelou prioridade',p.plate,false);save();render()});
   $$('.photo-btn').forEach(b=>b.onclick=()=>showHistoryPhoto(b.dataset.id,b.dataset.kind));
   $('#historySearch')?.addEventListener('input',filterHistory);$('#historyOperation')?.addEventListener('change',filterHistory);
