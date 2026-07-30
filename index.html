@@ -930,21 +930,115 @@ async function startReceiving(e){
   save(false);
   unlockReceivingOperation({applyPending:true,refresh:true});
   if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),300)}
-  toast('Descarregamento iniciado e salvo.','ok');
- }catch(err){
-  console.error('Erro ao iniciar descarregamento:',err);
-  toast('Não foi possível iniciar. Os dados locais foram preservados.','error',9000);
-  try{persistLocalSnapshot()}catch(e){}
- }finally{
-  startingReceiving=false;
-  if(submit&&document.body.contains(submit)){submit.disabled=false;submit.textContent=originalText;}
+
+toast('Descarregamento iniciado e salvo.','ok');
+
+const legendaInicio=
+`🚛 INÍCIO DO DESCARREGAMENTO
+
+Motorista: ${driver.name}
+
+Placa: ${driver.plate}
+
+Cavalo: ${driver.horse}
+
+Tipologia: ${driver.typology}
+
+Doca: ${dock}
+
+Operador: ${session.name}
+
+Data: ${new Date().toLocaleString('pt-BR')}`;
+
+setTimeout(async()=>{
+
+ if(confirm('Deseja compartilhar a Foto Inicial pelo WhatsApp?')){
+
+  await compartilharFotoOperacao(
+   photo,
+   legendaInicio,
+   `Inicio_${driver.plate}.jpg`
+  );
+
  }
+
+},300);
+
+}catch(err){
+ console.error('Erro ao iniciar descarregamento:',err);
+ toast('Não foi possível iniciar. Os dados locais foram preservados.','error',9000);
+ try{persistLocalSnapshot()}catch(e){}
+}finally{
+ startingReceiving=false;
+ if(submit&&document.body.contains(submit)){submit.disabled=false;submit.textContent=originalText;}
+}
 }
 function getActiveVehicleSnapshot(id){
  const live=state.active.find(x=>x.id===id);
  if(live)return {...live};
  if(currentFinishContext&&currentFinishContext.id===id&&currentFinishContext.record)return {...currentFinishContext.record};
  return null;
+}
+
+async function compartilharFotoOperacao(base64,legenda,nomeArquivo='foto-crc.jpg'){
+ try{
+
+  if(!base64){
+   toast('Foto não encontrada para compartilhamento.','error');
+   return false;
+  }
+
+  const resposta=await fetch(base64);
+  const blob=await resposta.blob();
+
+  const arquivo=new File(
+   [blob],
+   nomeArquivo,
+   {type:blob.type||'image/jpeg'}
+  );
+
+  if(
+   navigator.share &&
+   navigator.canShare &&
+   navigator.canShare({files:[arquivo]})
+  ){
+   await navigator.share({
+    title:'CRC - Controle de Recebimento',
+    text:legenda,
+    files:[arquivo]
+   });
+
+   return true;
+  }
+
+  if(navigator.share){
+   await navigator.share({
+    title:'CRC - Controle de Recebimento',
+    text:legenda
+   });
+
+   toast('Seu navegador compartilhou somente a mensagem.','warning',6000);
+
+   return true;
+  }
+
+  window.open(
+   'https://wa.me/?text='+encodeURIComponent(legenda),
+   '_blank'
+  );
+
+  return true;
+
+ }catch(err){
+
+  if(err?.name==='AbortError')return false;
+
+  console.error(err);
+
+  toast('Não foi possível compartilhar a operação.','error');
+
+  return false;
+ }
 }
 function openFinish(id){
  const a=getActiveVehicleSnapshot(id);
@@ -972,36 +1066,163 @@ async function finishReceiving(e,id){
   const draft=finishDrafts[id]||{};
   draft.volumes=$('#finishVolumes')?.value??draft.volumes??0;
   draft.observation=$('#finishObs')?.value??draft.observation??'';
-  if(!draft.photo)return toast('Tire a foto final antes de confirmar.','error');
-  if(state.history.some(h=>h.id===id)){delete finishDrafts[id];currentFinishContext=null;closeModal();refreshUI();return toast('Veículo já finalizado.','ok');}
+
+  if(!draft.photo)
+   return toast('Tire a foto final antes de confirmar.','error');
+
+  if(state.history.some(h=>h.id===id)){
+   delete finishDrafts[id];
+   currentFinishContext=null;
+   closeModal();
+   refreshUI();
+   return toast('Veículo já finalizado.','ok');
+  }
+
   const a=snapshot||{...(currentFinishContext?.record||{}),id};
-  if(!a?.id)return toast('Não foi possível identificar o veículo.','error');
-  if(btn){btn.disabled=true;btn.textContent='Finalizando...';}
-  const finishedAt=nowISO(),startedAt=a.startedAt||finishedAt;
-  const duration=Math.max(1,Math.round((new Date(finishedAt)-new Date(startedAt))/60000));
-  const historyRecord={...a,id:a.id||id,finishedAt,durationMin:duration,receivedVolumes:Number(draft.volumes||0),observation:draft.observation||'',endPhoto:draft.photo,photoStartCode:a.photoStartCode||`INICIO-${Date.now()}`,photoEndCode:`FINAL-${Date.now()}`,updatedAt:finishedAt};
+
+  if(!a?.id)
+   return toast('Não foi possível identificar o veículo.','error');
+
+  if(btn){
+   btn.disabled=true;
+   btn.textContent='Finalizando...';
+  }
+
+  const finishedAt=nowISO(),
+        startedAt=a.startedAt||finishedAt;
+
+  const duration=Math.max(
+   1,
+   Math.round((new Date(finishedAt)-new Date(startedAt))/60000)
+  );
+
+  const historyRecord={
+   ...a,
+   id:a.id||id,
+   finishedAt,
+   durationMin:duration,
+   receivedVolumes:Number(draft.volumes||0),
+   observation:draft.observation||'',
+   endPhoto:draft.photo,
+   photoStartCode:a.photoStartCode||`INICIO-${Date.now()}`,
+   photoEndCode:`FINAL-${Date.now()}`,
+   updatedAt:finishedAt
+  };
+
   state.history.unshift(historyRecord);
+
   state.active=state.active.filter(x=>x.id!==id);
-  const dock=state.docks.find(d=>d.number===a.dock);if(dock)dock.status='Livre';
-  const priorityId=a.priorityId||state.priorities.find(p=>p.status!=='Concluída'&&(p.activeVehicleId===id||(a.plate&&p.plate===a.plate)))?.id;
-  if(priorityId){const p=state.priorities.find(x=>x.id===priorityId);if(p){p.status='Concluída';p.finishedAt=finishedAt;p.dock=a.dock;p.updatedAt=finishedAt;}}
-  delete finishDrafts[id];currentFinishContext=null;
-  log('Finalizou descarregamento',`${a.driverName||'Motorista'} • Doca ${a.dock||'-'} • HC ${Number(a.hc||1)} • ${duration} min`,false);
+
+  const dock=state.docks.find(d=>d.number===a.dock);
+
+  if(dock)dock.status='Livre';
+
+  const priorityId=
+   a.priorityId||
+   state.priorities.find(
+    p=>
+     p.status!=='Concluída'&&
+     (
+      p.activeVehicleId===id||
+      (a.plate&&p.plate===a.plate)
+     )
+   )?.id;
+
+  if(priorityId){
+   const p=state.priorities.find(x=>x.id===priorityId);
+
+   if(p){
+    p.status='Concluída';
+    p.finishedAt=finishedAt;
+    p.dock=a.dock;
+    p.updatedAt=finishedAt;
+   }
+  }
+
+  delete finishDrafts[id];
+
+  currentFinishContext=null;
+
+  log(
+   'Finalizou descarregamento',
+   `${a.driverName||'Motorista'} • Doca ${a.dock||'-'} • HC ${Number(a.hc||1)} • ${duration} min`,
+   false
+  );
+
   save(false);
+
   closeModal();
+
   refreshUI();
-  if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),300)}
+
+  if(state.settings.supabaseEnabled){
+   clearTimeout(syncTimer);
+   syncTimer=setTimeout(()=>syncCloud(true),300);
+  }
+
   toast('Veículo finalizado, salvo e doca liberada.','ok');
+
+  /* ===== COMPARTILHAR FOTO FINAL ===== */
+
+  const legendaFinal=
+`✅ DESCARGA FINALIZADA
+
+Motorista: ${a.driverName}
+
+Placa: ${a.plate}
+
+Cavalo: ${a.horse}
+
+Tipologia: ${a.typology}
+
+Doca: ${a.dock}
+
+Volumes: ${historyRecord.receivedVolumes}
+
+Tempo: ${duration} min
+
+Operador: ${session.name}
+
+Data: ${new Date().toLocaleString('pt-BR')}`;
+
+  setTimeout(async()=>{
+
+   if(confirm('Deseja compartilhar a Foto Final pelo WhatsApp?')){
+
+    await compartilharFotoOperacao(
+      draft.photo,
+      legendaFinal,
+      `Final_${a.plate}.jpg`
+    );
+
+   }
+
+  },300);
+
  }catch(err){
+
   console.error('Erro ao finalizar descarregamento:',err);
-  toast('Não foi possível finalizar. O veículo continua preservado localmente.','error',9000);
-  try{persistLocalSnapshot()}catch(e){}
+
+  toast(
+   'Não foi possível finalizar. O veículo continua preservado localmente.',
+   'error',
+   9000
+  );
+
+  try{
+   persistLocalSnapshot();
+  }catch(e){}
+
  }finally{
+
   const liveBtn=$('#confirmFinishBtn');
-  if(liveBtn){liveBtn.disabled=false;liveBtn.textContent=originalText;}
+
+  if(liveBtn){
+   liveBtn.disabled=false;
+   liveBtn.textContent=originalText;
  }
 }
-
+}
 
 function openAccessSetup(user){
   const needsOperation=user.role==='receiving';
