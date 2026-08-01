@@ -522,7 +522,7 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='10.5';
+ state.version='10.6';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
@@ -563,7 +563,7 @@ function unlockReceivingOperation({applyPending=true,refresh=true}={}){
  receivingOperationLockedAt=0;
  if(applyPending&&pendingIncomingState){
   const localSettings={...(state.settings||{})};
-  state=normalizeStateShape(JSON.parse(JSON.stringify(pendingIncomingState)));
+  state=mergeStates(state,pendingIncomingState);
   enforceDefaultAccessAndDedupe();
   state.settings={...(state.settings||{}),supabaseUrl:localSettings.supabaseUrl||state.settings?.supabaseUrl||'',supabaseKey:localSettings.supabaseKey||'',supabaseEnabled:localSettings.supabaseEnabled??state.settings?.supabaseEnabled??false};
   pendingIncomingState=null;
@@ -588,8 +588,8 @@ function applyIncomingState(incoming,force=false){
   return true;
  }
  const localSettings={...(state.settings||{})};
- state=normalizeStateShape(JSON.parse(JSON.stringify(incoming)));enforceDefaultAccessAndDedupe();state.settings={...(state.settings||{}),supabaseUrl:localSettings.supabaseUrl||state.settings?.supabaseUrl||'',supabaseKey:localSettings.supabaseKey||'',supabaseEnabled:localSettings.supabaseEnabled??state.settings?.supabaseEnabled??false};
- lastAppliedCloudFingerprint=fingerprint;
+ state=mergeStates(state,incoming);enforceDefaultAccessAndDedupe();state.settings={...(state.settings||{}),supabaseUrl:localSettings.supabaseUrl||state.settings?.supabaseUrl||'',supabaseKey:localSettings.supabaseKey||'',supabaseEnabled:localSettings.supabaseEnabled??state.settings?.supabaseEnabled??false};
+ lastAppliedCloudFingerprint=cloudFingerprint(state);
  persistLocalSnapshot();
  const evt=state.meta?.lastEvent;if(evt?.id&&evt.id!==lastNotifiedEventId&&evt.user!==session?.name){lastNotifiedEventId=evt.id;toast(`${evt.action}${evt.detail?' • '+evt.detail:''}`,'ok',6500)}
  if(isEditingUI()){scheduleVisualRefresh(500);return true;}refreshUI(true);return true;
@@ -599,11 +599,18 @@ function toast(msg,type='',duration=7000){
  const d=document.createElement('div');
  const titles={error:'Atenção',ok:'Concluído',attention:'Atenção de tempo',warning:'Alerta de tempo',overtime:'Tempo excedido',priority:'Veículo prioritário'};
  d.className='toast '+type;d.innerHTML=`<strong>${titles[type]||'CRC'}</strong><div>${esc(msg)}</div>`;
- $('#toasts').appendChild(d);setTimeout(()=>d.remove(),duration);
+ d.style.touchAction='pan-y';
+ let startX=0,currentX=0,dragging=false,removed=false;
+ const removeToast=()=>{if(removed)return;removed=true;d.style.transition='transform .2s ease,opacity .2s ease';d.style.transform='translateX(120%)';d.style.opacity='0';setTimeout(()=>d.remove(),220)};
+ d.addEventListener('pointerdown',e=>{startX=e.clientX;currentX=0;dragging=true;d.setPointerCapture?.(e.pointerId);d.style.transition='none'});
+ d.addEventListener('pointermove',e=>{if(!dragging)return;currentX=Math.max(0,e.clientX-startX);d.style.transform=`translateX(${currentX}px)`;d.style.opacity=String(Math.max(.25,1-currentX/260))});
+ const finishSwipe=()=>{if(!dragging)return;dragging=false;if(currentX>=85)removeToast();else{d.style.transition='transform .18s ease,opacity .18s ease';d.style.transform='translateX(0)';d.style.opacity='1'}};
+ d.addEventListener('pointerup',finishSwipe);d.addEventListener('pointercancel',finishSwipe);
+ $('#toasts').appendChild(d);setTimeout(removeToast,duration);
 }
 function roleName(r){return({admin:'Administrador',tower:'Torre de Controle',leader:'Líder',receiving:'Recebimento Operacional'})[r]||r}
 function can(...roles){return session&&roles.includes(session.role)}
-function isVisible(page){const map={dashboard:['admin','tower','leader','receiving'],receiving:['admin','receiving'],planning:['admin','tower'],priorities:['admin','tower'],history:['admin','tower','leader','receiving'],drivers:['admin','leader'],docks:['admin','leader'],admin:['admin'],logs:['admin']};return (map[page]||[]).includes(session.role)}
+function isVisible(page){const map={dashboard:['admin','tower','leader','receiving'],receiving:['admin','receiving'],planning:['admin','tower'],priorities:['admin','tower'],history:['admin','tower','leader','receiving'],drivers:['admin','leader','receiving'],docks:['admin','leader'],admin:['admin'],logs:['admin']};return (map[page]||[]).includes(session.role)}
 const navItems=[
   ['dashboard','📊','Painel Geral'],['receiving','🚚','Recebimento'],['planning','🗓️','Previsão da Torre'],
   ['priorities','🚨','Prioridades'],['history','📋','Lista / Histórico'],['drivers','👨‍✈️','Motoristas'],
@@ -848,6 +855,7 @@ function renderDrivers(){
  const uniqueDrivers=enforceIncomingDedupe({drivers:[...state.drivers]}).drivers;
  return pageHead('Cadastro de Motoristas','Cada motorista permanece vinculado ao seu veículo.')+
  `<div class="panel"><form id="driverForm"><input id="driverId" type="hidden"><div class="form-grid"><div><label>Nome completo</label><input id="driverName" required></div><div><label>Tipologia</label><select id="driverTyp">${state.typologies.map(t=>`<option>${esc(t.name)}</option>`).join('')}</select></div><div><label>Placa do veículo</label><input id="driverPlate" required></div><div><label>Placa do cavalo</label><input id="driverHorse" value="S/N" required></div><div><label>Status</label><select id="driverStatus"><option>Ativo</option><option>Inativo</option></select></div><div style="align-self:end"><button class="btn btn-primary">Salvar motorista</button></div></div></form></div>
+ <div class="panel"><div class="panel-title"><div><h3>Importar motoristas por Excel</h3><span class="small">Coluna A: Motorista • B: Placa • C: Cavalo • D: Tipologia</span></div><button id="importDriversBtn" type="button" class="btn btn-success">Importar Excel</button></div><input id="driversExcelInput" type="file" accept=".xlsx,.xls,.csv" hidden></div>
  <div class="panel"><div class="panel-title"><h3>Motoristas cadastrados</h3><button id="deleteAllDriversBtn" class="btn btn-danger">Excluir todos os motoristas</button></div><div class="table-wrap"><table><thead><tr><th>Nome</th><th>Tipologia</th><th>Placa</th><th>Cavalo</th><th>Status</th><th>Ações</th></tr></thead><tbody>${uniqueDrivers.map(d=>`<tr><td>${esc(d.name)}</td><td>${esc(d.typology)}</td><td>${esc(d.plate)}</td><td>${esc(d.horse)}</td><td>${esc(d.status)}</td><td><button class="btn btn-soft edit-driver" data-id="${d.id}">Editar</button> <button class="btn btn-danger delete-driver" data-id="${d.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>`;
 }
 function renderDocks(){
@@ -900,7 +908,7 @@ function bindPage(){
   $$('.photo-btn').forEach(b=>b.onclick=()=>showHistoryPhoto(b.dataset.id,b.dataset.kind));
   $('#historySearch')?.addEventListener('input',filterHistory);$('#historyOperation')?.addEventListener('change',filterHistory);
   $('#exportBtn')?.addEventListener('click',exportExcel);$('#closeTurnBtn')?.addEventListener('click',closeTurn);
-  $('#driverForm')?.addEventListener('submit',saveDriver);$$('.edit-driver').forEach(b=>b.onclick=()=>editDriver(b.dataset.id));$$('.delete-driver').forEach(b=>b.onclick=()=>deleteDriver(b.dataset.id));$('#deleteAllDriversBtn')?.addEventListener('click',deleteAllDrivers);
+  $('#driverForm')?.addEventListener('submit',saveDriver);$$('.edit-driver').forEach(b=>b.onclick=()=>editDriver(b.dataset.id));$$('.delete-driver').forEach(b=>b.onclick=()=>deleteDriver(b.dataset.id));$('#deleteAllDriversBtn')?.addEventListener('click',deleteAllDrivers);$('#importDriversBtn')?.addEventListener('click',()=>$('#driversExcelInput')?.click());$('#driversExcelInput')?.addEventListener('change',importDriversExcel);
   $('#dockForm')?.addEventListener('submit',addDock);$$('.toggle-dock').forEach(b=>b.onclick=()=>toggleDock(b.dataset.id));$$('.delete-dock').forEach(b=>b.onclick=()=>deleteDock(b.dataset.id));
   $('#userForm')?.addEventListener('submit',saveUser);$$('.edit-user').forEach(b=>b.onclick=()=>editUser(b.dataset.id));$$('.delete-user').forEach(b=>b.onclick=()=>deleteUser(b.dataset.id));
   $('#typForm')?.addEventListener('submit',addTypology);$$('.typ-time').forEach(i=>i.onchange=()=>{const t=state.typologies.find(x=>x.name===i.dataset.name);t.targetMin=Number(i.value);log('Alterou tempo-meta',`${t.name}: ${t.targetMin} min`);render()});$$('.delete-typ').forEach(b=>b.onclick=()=>deleteTypology(b.dataset.name));
@@ -1335,7 +1343,36 @@ async function closeTurn(){
  const ok=await syncCloud(true);
  toast(ok?'Turno arquivado no Supabase. Pendências preservadas para o próximo turno.':'Turno arquivado localmente, mas a sincronização com o Supabase falhou.',''+(ok?'ok':'error'),9000);
 }
-function saveDriver(e){e.preventDefault();const id=$('#driverId').value,obj={name:$('#driverName').value.trim(),typology:$('#driverTyp').value,plate:$('#driverPlate').value.trim().toUpperCase(),horse:$('#driverHorse').value.trim().toUpperCase()||'S/N',status:$('#driverStatus').value,updatedAt:nowISO()};if(state.drivers.some(x=>x.id!==id&&(x.plate===obj.plate||x.name.toLowerCase()===obj.name.toLowerCase())))return toast('Já existe motorista com este nome ou placa.','error');if(id){Object.assign(state.drivers.find(x=>x.id===id),obj);state.meta.deletedDrivers=(state.meta.deletedDrivers||[]).filter(x=>x!==id)}else state.drivers.push({id:uid(),createdAt:nowISO(),...obj});log(id?'Editou motorista':'Cadastrou motorista',obj.name,false);save();render()}
+function normalizeDriverName(value){return String(value||'').trim().replace(/\s+/g,' ')}
+function normalizeDriverPlate(value){return String(value||'').trim().toUpperCase().replace(/\s+/g,'')}
+function saveDriver(e){
+ e.preventDefault();
+ const id=$('#driverId').value;
+ const obj={name:normalizeDriverName($('#driverName').value),typology:$('#driverTyp').value,plate:normalizeDriverPlate($('#driverPlate').value),horse:normalizeDriverPlate($('#driverHorse').value)||'S/N',status:$('#driverStatus').value,updatedAt:nowISO()};
+ if(obj.name.split(' ').filter(Boolean).length<2)return toast('Informe o nome completo do motorista para diferenciar pessoas com o mesmo primeiro nome.','error');
+ if(state.drivers.some(x=>x.id!==id&&normalizeDriverPlate(x.plate)===obj.plate))return toast('Já existe motorista com esta placa.','error');
+ if(state.drivers.some(x=>x.id!==id&&normalizeDriverName(x.name).toLowerCase()===obj.name.toLowerCase()))return toast('Já existe motorista com este nome completo. Informe uma parte diferente do nome.','error');
+ if(id){Object.assign(state.drivers.find(x=>x.id===id),obj);state.meta.deletedDrivers=(state.meta.deletedDrivers||[]).filter(x=>x!==id)}else state.drivers.push({id:uid(),createdAt:nowISO(),...obj});
+ log(id?'Editou motorista':'Cadastrou motorista',obj.name,false);save();render();
+}
+async function importDriversExcel(e){
+ const input=e.currentTarget,file=input?.files?.[0];if(!file)return;
+ try{
+  const data=await file.arrayBuffer(),workbook=XLSX.read(data,{type:'array'}),sheet=workbook.Sheets[workbook.SheetNames[0]],rows=XLSX.utils.sheet_to_json(sheet,{header:1,defval:''});
+  let imported=0,duplicates=0,invalid=0;const knownPlates=new Set(state.drivers.map(d=>normalizeDriverPlate(d.plate))),knownNames=new Set(state.drivers.map(d=>normalizeDriverName(d.name).toLowerCase()));
+  rows.forEach((row,index)=>{
+   const name=normalizeDriverName(row[0]),plate=normalizeDriverPlate(row[1]),horse=normalizeDriverPlate(row[2])||'S/N',rawTyp=String(row[3]||'').trim();
+   if(!name&&!plate&&!rawTyp)return;
+   if(index===0&&/motorista|nome/i.test(name)&&/placa/i.test(String(row[1]||'')))return;
+   const typology=state.typologies.find(t=>t.name.toLowerCase()===rawTyp.toLowerCase())?.name||'';
+   if(name.split(' ').filter(Boolean).length<2||!plate||!typology){invalid++;return}
+   const nameKey=name.toLowerCase();if(knownPlates.has(plate)||knownNames.has(nameKey)){duplicates++;return}
+   const at=nowISO();state.drivers.push({id:uid(),name,plate,horse,typology,status:'Ativo',createdAt:at,updatedAt:at});knownPlates.add(plate);knownNames.add(nameKey);imported++;
+  });
+  if(imported){log('Importou motoristas por Excel',`${imported} importados • ${duplicates} duplicados • ${invalid} inválidos`,false);save(true);render()}
+  toast(`${imported} importados • ${duplicates} duplicados • ${invalid} inválidos`,imported?'ok':'error',9000);
+ }catch(err){console.error('Erro ao importar motoristas:',err);toast('Não foi possível ler a planilha. Confira as colunas A a D.','error',9000)}finally{if(input)input.value=''}
+}
 function editDriver(id){const d=state.drivers.find(x=>x.id===id);$('#driverId').value=d.id;$('#driverName').value=d.name;$('#driverTyp').value=d.typology;$('#driverPlate').value=d.plate;$('#driverHorse').value=d.horse;$('#driverStatus').value=d.status;scrollTo({top:0,behavior:'smooth'})}
 function deleteDriver(id){if(state.active.some(a=>a.driverId===id))return toast('Motorista está em descarregamento. Finalize antes de excluir.','error');const d=state.drivers.find(x=>x.id===id);if(!d)return;if(confirm('Excluir motorista definitivamente?')){state.meta.deletedDrivers=[...new Set([...(state.meta.deletedDrivers||[]),id])];state.drivers=state.drivers.filter(x=>x.id!==id);state.priorities=state.priorities.filter(p=>p.driverId!==id);log('Excluiu motorista',d.name,false);save(true);render()}}
 function deleteAllDrivers(){if(state.active.length)return toast('Existem veículos em descarregamento. Finalize-os antes de excluir todos os motoristas.','error');if(!confirm('Excluir TODOS os motoristas cadastrados?'))return;if(!confirm('Confirma a exclusão definitiva de todos os motoristas?'))return;state.meta.deletedDrivers=[...new Set([...(state.meta.deletedDrivers||[]),...state.drivers.map(d=>d.id)])];state.drivers=[];state.priorities=[];log('Excluiu todos os motoristas','Cadastro de motoristas zerado',false);save(true);render()}
@@ -1367,7 +1404,7 @@ function mergeStates(local,remote){
  merged.history=merged.history.filter(h=>!archivedIds.has(h.id));
  const occupied=new Set(merged.active.map(a=>a.dock));
  merged.docks=uniqueDocks(merged.docks).map(d=>({...d,status:occupied.has(d.number)?'Ocupada':(d.status==='Ocupada'?'Livre':d.status)}));
- merged.version='10.5';merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
+ merged.version='10.6';merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
  return normalizeStateShape(merged);
 }
 function initSupabase(){
