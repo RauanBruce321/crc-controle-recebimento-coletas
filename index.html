@@ -354,13 +354,11 @@ body.crc-dark #app td{border-color:#2a354b}
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const DBKEY='crc_v1_state', BACKUPKEY='crc_v1_internal_backup', SESSION='crc_v1_session', SESSION_PERSIST='crc_v1_session_persist';
-const SUPABASE_URL = 'https://dqyxaxhufuehyofvfzub.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_l9EiUJw6GUy3jfxHDiXa2g_IezevB_5';
-const SUPABASE_TABLE = 'crc';
-const SUPABASE_ROW_ID = 'principal';
-
-const nowISO = () => new Date().toISOString();
-const brDate = x => new Date(x).toLocaleString('pt-BR');
+const SUPABASE_URL='https://spnbmojzoebzehzkcwuj.supabase.co';
+const SUPABASE_KEY='sb_publishable_9b8gteZOKKKoly9dw5K8bA_2btDk_cz';
+const SUPABASE_TABLE='crc';
+const SUPABASE_ROW_ID='principal';
+const nowISO=()=>new Date().toISOString(), brDate=x=>new Date(x).toLocaleString('pt-BR');
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const mins=(ms)=>Math.max(0,Math.floor(ms/60000));
