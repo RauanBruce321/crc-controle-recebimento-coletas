@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V11.3 CONSTÂNCIA PÁTIO + PREVISÃO</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V11.3 OTIMIZADO SUPABASE</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -910,7 +910,7 @@ function addPatioVehicle(e){
  if(driver)Object.assign(driver,{name,horse,typology,status:'Ativo',updatedAt:nowISO()});
  else{driver={id:uid(),name,plate,horse,typology,status:'Ativo',createdAt:nowISO(),updatedAt:nowISO()};state.drivers.push(driver)}
  state.patio.push({id:uid(),driverId:driver.id,driverName:name,plate,horse,typology,arrivedAt:nowISO(),createdAt:nowISO(),updatedAt:nowISO()});
- log('Entrada no pátio',`${name} • ${plate}`,false);save(true);render();toast('Veículo adicionado ao pátio.','ok');if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),60)}
+ log('Entrada no pátio',`${name} • ${plate}`,false);save(true);render();toast('Veículo adicionado ao pátio.','ok')
 }
 function renderReceiving(){
  return pageHead('Recebimento Operacional','Selecione o motorista, confirme a doca, registre a foto e inicie a descarga.')+
@@ -1517,9 +1517,9 @@ async function closeOperationalDay(){
 }
 
 let addingPlan=false;
-function addPlan(e){e.preventDefault();if(addingPlan)return;const btn=e.currentTarget?.querySelector('button[type="submit"]');const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');addingPlan=true;if(btn)btn.disabled=true;try{const duplicate=state.plan.some(x=>x.date===date&&x.typology===typology&&Number(x.vehicles)===vehicles&&Number(x.volumes)===volumes&&Number(x.weight||0)===weight&&(Date.now()-new Date(x.createdAt||0).getTime())<5000);if(duplicate)return toast('Este lançamento já foi registrado.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(false);e.currentTarget.reset();$('#planDate').value=new Date().toISOString().slice(0,10);render();if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),60)}toast('Programação cadastrada.','ok');if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),60)}}finally{addingPlan=false;if(btn&&document.body.contains(btn))btn.disabled=false}}
+function addPlan(e){e.preventDefault();if(addingPlan)return;const btn=e.currentTarget?.querySelector('button[type="submit"]');const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');addingPlan=true;if(btn)btn.disabled=true;try{const duplicate=state.plan.some(x=>x.date===date&&x.typology===typology&&Number(x.vehicles)===vehicles&&Number(x.volumes)===volumes&&Number(x.weight||0)===weight&&(Date.now()-new Date(x.createdAt||0).getTime())<5000);if(duplicate)return toast('Este lançamento já foi registrado.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(false);e.currentTarget.reset();$('#planDate').value=new Date().toISOString().slice(0,10);render();if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),120)}toast('Programação cadastrada.','ok')}finally{addingPlan=false;if(btn&&document.body.contains(btn))btn.disabled=false}}
 
-function addPriority(e){e.preventDefault();const driver=state.drivers.find(d=>d.id===$('#prioDriver').value&&d.status==='Ativo');if(!driver)return toast('Motorista não cadastrado ou inativo. Cadastre o motorista no Recebimento ou no Pátio.','error');if(state.priorities.some(p=>p.status==='Aguardando'&&p.driverId===driver.id))return toast('Este motorista já está na fila de prioridade.','error');const createdAt=nowISO(),p={id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()};state.priorities.push(p);log('Cadastrou prioridade',`${p.driverName} • ${p.plate} • ${p.typology}`,false);save(true);toast(`${p.driverName} • ${p.plate} • ${p.typology}`,'priority',8000);render();if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),60)}}
+function addPriority(e){e.preventDefault();const driver=state.drivers.find(d=>d.id===$('#prioDriver').value&&d.status==='Ativo');if(!driver)return toast('Motorista não cadastrado ou inativo. Cadastre o motorista no Recebimento ou no Pátio.','error');if(state.priorities.some(p=>p.status==='Aguardando'&&p.driverId===driver.id))return toast('Este motorista já está na fila de prioridade.','error');const createdAt=nowISO(),p={id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()};state.priorities.push(p);log('Cadastrou prioridade',`${p.driverName} • ${p.plate} • ${p.typology}`,false);save(true);toast(`${p.driverName} • ${p.plate} • ${p.typology}`,'priority',8000);render()}
 function filterHistory(){const q=$('#historySearch').value.toLowerCase(),op=$('#historyOperation').value;$$('#historyTable tbody tr').forEach(tr=>tr.style.display=(!q||tr.innerText.toLowerCase().includes(q))&&(!op||tr.innerText.includes(op))?'':'none')}
 function exportExcel(){
  const audit=auditFileName();
@@ -1709,7 +1709,6 @@ function initRealtime(){
  supabaseChannel=supabaseClient
   .channel('crc-live-v113',{config:{broadcast:{self:false}}})
   .on('postgres_changes',{event:'*',schema:'public',table:SUPABASE_TABLE,filter:`id=eq.${SUPABASE_ROW_ID}`},()=>scheduleCloudPull(15))
-  .on('broadcast',{event:'crc-change'},()=>scheduleCloudPull(15))
   .subscribe(status=>{
     if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
       try{supabaseClient.removeChannel(supabaseChannel)}catch(e){}
@@ -1847,16 +1846,8 @@ async function syncCloud(silent=false){
   lastAppliedCloudFingerprint=cloudFingerprint(payload);
 
   persistLocalSnapshot();
+   // Postgres Changes notifica os demais aparelhos; sem Broadcast/GET redundantes.
 
-  try{
-   await supabaseChannel?.send({
-    type:'broadcast',
-    event:'crc-change',
-    payload:{at:sentStamp,revision:payload.meta?.revision||0,event:state.meta?.lastEvent||null}
-   });
-  }catch(e){}
-
-  setTimeout(()=>{if(!localDirty)pullCloud(true)},250);
 
   if((state.meta?.updatedAt||'')!==sentStamp)
    syncQueued=true;
@@ -1966,7 +1957,7 @@ async function startCRC(){
  timerLoop=setInterval(()=>{updateTimers();checkTimeAlerts()},1000);
  priorityLoop=setInterval(priorityReminder,15000);
  // Realtime é a fonte principal. A consulta abaixo é apenas uma segurança eventual.
- setInterval(()=>{if(cloudSessionAllowed()&&!syncInFlight&&!isReceivingOperationLocked()&&Date.now()-lastLocalMutationAt>3000)pullCloud(false)},30000);
+ setInterval(()=>{if(cloudSessionAllowed()&&!syncInFlight&&!isReceivingOperationLocked()&&!localDirty&&Date.now()-lastLocalMutationAt>10000)pullCloud(false)},120000);
 }
 startCRC();
 // CRC V10.9: fluxo contínuo, Realtime com dupla via, pull ao retornar ao app e atualização manual.
@@ -1990,8 +1981,8 @@ document.addEventListener('submit',e=>{
  setTimeout(()=>{if(f)f.dataset.submitting='0'},900);
 },true);
 
-window.addEventListener('focus',()=>{if(state?.settings?.supabaseEnabled&&!localDirty)pullCloud(true)});
-window.addEventListener('pageshow',()=>{if(state?.settings?.supabaseEnabled&&!localDirty)pullCloud(true)});
+window.addEventListener('focus',()=>{if(state?.settings?.supabaseEnabled&&!localDirty)scheduleCloudPull(180)});
+window.addEventListener('pageshow',()=>{if(state?.settings?.supabaseEnabled&&!localDirty)scheduleCloudPull(180)});
 </script>
 
 
