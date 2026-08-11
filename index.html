@@ -445,10 +445,13 @@ function normalizeStateShape(target){
  target.meta=target.meta||{createdAt:nowISO(),updatedAt:nowISO(),revision:0};
  target.meta.deletedDrivers=Array.isArray(target.meta.deletedDrivers)?target.meta.deletedDrivers:[];
  target.meta.deletedDocks=Array.isArray(target.meta.deletedDocks)?target.meta.deletedDocks:[];
+ target.meta.deletedPlans=Array.isArray(target.meta.deletedPlans)?target.meta.deletedPlans:[];
  const deletedDrivers=new Set(target.meta.deletedDrivers);
  const deletedDocks=new Set(target.meta.deletedDocks);
+ const deletedPlans=new Set(target.meta.deletedPlans);
  target.drivers=target.drivers.filter(x=>!deletedDrivers.has(x.id));
  target.docks=target.docks.filter(x=>!deletedDocks.has(x.id));
+ target.plan=target.plan.filter(x=>!deletedPlans.has(x.id));
  target.settings=target.settings||{};
  return target;
 }
@@ -744,6 +747,8 @@ function performanceTable(){
  return `<div class="panel"><div class="panel-title"><h3>Desempenho das docas</h3><span class="small">Produção do histórico atual</span></div><div class="table-wrap"><table><thead><tr><th>Doca</th><th>Veículos</th><th>Tempo médio</th><th>Volumes/min</th></tr></thead><tbody>${rows.map(r=>`<tr><td>Doca ${r.dock}</td><td>${r.count}</td><td>${r.avg||'—'}${r.avg?' min':''}</td><td>${r.prod?`${r.prod} vls/minuto`:'—'}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 function localDateKey(value){
+ // Datas puras YYYY-MM-DD já representam o dia operacional local; não converter via UTC.
+ if(typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value))return value;
  const d=value?new Date(value):new Date();
  if(!Number.isFinite(d.getTime()))return String(value||'').slice(0,10);
  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -944,9 +949,9 @@ function renderPlanning(){
  <div class="panel"><div class="panel-title"><h3>Previsão lançada</h3><span class="small">Somente a previsão operacional do dia</span></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipologia</th><th>Veículos</th><th>Volumes</th><th>Peso</th><th>Média por carro</th><th>Ação</th></tr></thead><tbody>${state.plan.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.typology)}</td><td>${p.vehicles}</td><td>${p.volumes.toLocaleString('pt-BR')}</td><td>${Number(p.weight).toLocaleString('pt-BR')}</td><td>${Math.round(p.volumes/p.vehicles)}</td><td><button class="btn btn-danger delete-plan" data-id="${p.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>`+noShowPanel();
 }
 function renderPriorities(){
- const available=state.drivers.filter(d=>d.status==='Ativo'&&(session.role!=='patio'||state.patio.some(p=>p.driverId===d.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(d.plate)))).sort((a,b)=>a.name.localeCompare(b.name));
+ const available=state.drivers.filter(d=>d.status==='Ativo').sort((a,b)=>a.name.localeCompare(b.name));
  return pageHead('Prioridades','Veículos prioritários.')+
- `<div class="panel"><form id="priorityForm"><div class="form-grid"><div class="full"><label>Motorista cadastrado</label><select id="prioDriver" required><option value="">Selecione...</option>${available.map(d=>`<option value="${d.id}">${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`).join('')}</select><p class="small">Não encontrou o motorista? Cadastre primeiro o veículo em Carros no Pátio.</p></div><div><label>Placa</label><input id="prioPlate" class="readonly-field" readonly></div><div><label>Cavalo</label><input id="prioHorse" class="readonly-field" readonly></div><div><label>Tipologia</label><input id="prioTyp" class="readonly-field" readonly></div><div><label>Quantidade prevista calculada</label><input id="prioExpectedVolumes" type="number" min="0" readonly class="readonly-field"></div><div><label>Motivo (opcional)</label><input id="prioReason"></div><div class="full"><button class="btn btn-danger">Cadastrar prioridade</button></div></div></form></div>
+ `<div class="panel"><form id="priorityForm"><div class="form-grid"><div class="full"><label>Motorista cadastrado</label><input id="prioDriverSearch" type="search" placeholder="Pesquisar nome do motorista ou placa..." autocomplete="off"><select id="prioDriver" required style="margin-top:8px"><option value="">Selecione...</option>${available.map(d=>`<option value="${d.id}" data-search="${esc((d.name+' '+d.plate+' '+d.typology).toLowerCase())}">${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`).join('')}</select><p class="small">A prioridade pode ser lançada para qualquer motorista cadastrado, mesmo que ainda não esteja no pátio.</p></div><div><label>Placa</label><input id="prioPlate" class="readonly-field" readonly></div><div><label>Cavalo</label><input id="prioHorse" class="readonly-field" readonly></div><div><label>Tipologia</label><input id="prioTyp" class="readonly-field" readonly></div><div><label>Quantidade prevista calculada</label><input id="prioExpectedVolumes" type="number" min="0" readonly class="readonly-field"></div><div><label>Motivo (opcional)</label><input id="prioReason"></div><div class="full"><button class="btn btn-danger">Cadastrar prioridade</button></div></div></form></div>
  <div class="panel"><div class="table-wrap"><table><thead><tr><th>Motorista</th><th>Placa</th><th>Tipologia</th><th>Motivo</th><th>Status</th><th>Cadastro</th><th>Ação</th></tr></thead><tbody>${state.priorities.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(p=>`<tr><td>${esc(p.driverName)}</td><td>${esc(p.plate)}</td><td>${esc(p.typology)}</td><td>${esc(p.reason||'—')}</td><td><span class="badge ${p.status==='Aguardando'?'badge-red':'badge-green'}">${p.status}</span></td><td>${brDate(p.createdAt)}</td><td>${p.status==='Aguardando'?`<button class="btn btn-soft cancel-priority" data-id="${p.id}">Cancelar</button>`:'—'}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 function historyRows(){
@@ -1018,7 +1023,7 @@ function bindPage(){
     render();
   });
 
-  $('#priorityForm')?.addEventListener('submit',addPriority);$('#prioDriver')?.addEventListener('change',refreshPriorityDriverFields);refreshPriorityDriverFields();$$('.cancel-priority').forEach(b=>b.onclick=()=>{const p=state.priorities.find(x=>x.id===b.dataset.id);if(!p)return;p.status='Cancelada';p.cancelledAt=nowISO();p.updatedAt=nowISO();log('Cancelou prioridade',p.plate,false);save();render()});
+  $('#priorityForm')?.addEventListener('submit',addPriority);$('#prioDriver')?.addEventListener('change',refreshPriorityDriverFields);const prioSearch=$('#prioDriverSearch'),prioSelect=$('#prioDriver');if(prioSearch&&prioSelect){prioSearch.addEventListener('input',()=>{const q=prioSearch.value.trim().toLowerCase();[...prioSelect.options].forEach((o,i)=>{if(i===0)return;o.hidden=!!q&&!((o.dataset.search||o.textContent.toLowerCase()).includes(q))});const visible=[...prioSelect.options].filter((o,i)=>i>0&&!o.hidden);if(q&&visible.length===1){prioSelect.value=visible[0].value;prioSelect.dispatchEvent(new Event('change'))}})}refreshPriorityDriverFields();$$('.cancel-priority').forEach(b=>b.onclick=()=>{const p=state.priorities.find(x=>x.id===b.dataset.id);if(!p)return;p.status='Cancelada';p.cancelledAt=nowISO();p.updatedAt=nowISO();log('Cancelou prioridade',p.plate,false);save();render()});
   $$('.photo-btn').forEach(b=>b.onclick=()=>showHistoryPhoto(b.dataset.id,b.dataset.kind));$$('.share-history-photo').forEach(b=>b.onclick=()=>shareHistoryPhoto(b.dataset.id,b.dataset.kind));
   $('#historySearch')?.addEventListener('input',filterHistory);$('#historyOperation')?.addEventListener('change',filterHistory);
   $('#exportBtn')?.addEventListener('click',exportExcel);$('#closeTurnBtn')?.addEventListener('click',closeTurn);
@@ -1620,9 +1625,13 @@ function mergeStates(local,remote){
   merged[k]=mergeEntityArrays(local[k],remote[k],lt,rt);
  });
 
+ // Exclusões explícitas são tombstones: uma cópia antiga de outro aparelho não pode ressuscitar a previsão.
+ const deletedPlans=new Set([...(local.meta?.deletedPlans||[]),...(remote.meta?.deletedPlans||[])]);
+ merged.meta.deletedPlans=[...deletedPlans];
+
  // Programação da Torre: união por ID evita que um lançamento recém-feito
  // desapareça quando outro aparelho recebe/manda uma versão quase simultânea.
- merged.plan=mergeEntityArrays(local.plan,remote.plan,lt,rt);
+ merged.plan=mergeEntityArrays(local.plan,remote.plan,lt,rt).filter(x=>!deletedPlans.has(x.id));
 
  // Histórico
  // Nunca faz merge para evitar reaparecimento de recebimentos antigos.
