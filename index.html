@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V11.0 BASE ESTÁVEL + PÁTIO</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V11.3 CONSTÂNCIA PÁTIO + PREVISÃO</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -363,7 +363,7 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const mins=(ms)=>Math.max(0,Math.floor(ms/60000));
 let currentPage='dashboard', timerLoop=null, priorityLoop=null, supabaseClient=null, supabaseChannel=null, syncTimer=null, cloudApplying=false;
-let syncInFlight=false, syncQueued=false, lastLocalMutationAt=0, cloudPullTimer=null, visualRefreshTimer=null, lastNotifiedEventId='', lastAppliedCloudFingerprint='';
+let syncInFlight=false, syncQueued=false, lastLocalMutationAt=0, localDirty=false, cloudPullTimer=null, visualRefreshTimer=null, lastNotifiedEventId='', lastAppliedCloudFingerprint='';
 let finishDrafts={}, currentFinishContext=null;
 const stateChannel=('BroadcastChannel' in window)?new BroadcastChannel('crc_state_updates'):null;
 
@@ -380,7 +380,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:14},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'11.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'11.3',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -524,13 +524,14 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='10.8';
+ state.version='11.3';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
+ localDirty=true;
  persistLocalSnapshot();
  try{stateChannel?.postMessage({type:'state-updated',at:state.meta.updatedAt,revision:state.meta.revision})}catch(e){}
- if(sync&&state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),700)}
+ if(sync&&state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),180)}
 }
 function saveDeferred(sync=true){
  clearTimeout(saveDeferred._t);
@@ -620,7 +621,9 @@ if(evt?.id&&evt.id!==lastNotifiedEventId&&evt.user!==session?.name){
 
  lastNotifiedEventId=evt.id;
 
- toast(`${evt.action}${evt.detail?' • '+evt.detail:''}`,'ok',6500);
+ const importantRemoteEvent=/prioridade/i.test(evt.action||'');
+ if(importantRemoteEvent)
+  toast(`${evt.action}${evt.detail?' • '+evt.detail:''}`,'priority',8000);
 
 }
 
@@ -880,7 +883,9 @@ function renderPatio(){
  const rows=state.patio.slice().sort((a,b)=>new Date(a.arrivedAt)-new Date(b.arrivedAt));
  return pageHead('Carros no Pátio','Cadastre somente os veículos que estão fisicamente no pátio.')+
  `<div class="panel"><form id="patioForm"><div class="form-grid">
- <div class="span2"><label>Motorista já cadastrado (opcional)</label><select id="patioDriverSelect"><option value="">Novo motorista / digitar abaixo</option>${state.drivers.filter(d=>d.status==='Ativo').sort((a,b)=>a.name.localeCompare(b.name)).map(d=>`<option value="${d.id}">${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`).join('')}</select></div>
+ <div class="span2"><label>MOTORISTA</label>
+<input id="patioDriverSearch" type="search" placeholder="Pesquisar nome do motorista ou placa..." autocomplete="off">
+<select id="patioDriverSelect"><option value="">Selecione...</option>${state.drivers.filter(d=>d.status==='Ativo').sort((a,b)=>a.name.localeCompare(b.name)).map(d=>`<option value="${d.id}" data-search="${esc((d.name+' '+d.plate).toLowerCase())}">${esc(d.name)} • ${esc(d.plate)}</option>`).join('')}</select></div>
  <div><label>Motorista</label><input id="patioName" required></div>
  <div><label>Placa</label><input id="patioPlate" required></div>
  <div><label>Cavalo</label><input id="patioHorse" value="S/N"></div>
@@ -900,7 +905,7 @@ function addPatioVehicle(e){
  if(driver)Object.assign(driver,{name,horse,typology,status:'Ativo',updatedAt:nowISO()});
  else{driver={id:uid(),name,plate,horse,typology,status:'Ativo',createdAt:nowISO(),updatedAt:nowISO()};state.drivers.push(driver)}
  state.patio.push({id:uid(),driverId:driver.id,driverName:name,plate,horse,typology,arrivedAt:nowISO(),createdAt:nowISO(),updatedAt:nowISO()});
- log('Entrada no pátio',`${name} • ${plate}`,false);save(true);render();toast('Veículo adicionado ao pátio.','ok');if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),150)}
+ log('Entrada no pátio',`${name} • ${plate}`,false);save(true);render();toast('Veículo adicionado ao pátio.','ok');if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),60)}
 }
 function renderReceiving(){
  return pageHead('Recebimento Operacional','Selecione o motorista, confirme a doca, registre a foto e inicie a descarga.')+
@@ -979,6 +984,12 @@ function renderLogs(){return pageHead('Histórico do Sistema','Entradas, lançam
 function bindPage(){
   $('#patioForm')?.addEventListener('submit',addPatioVehicle);$$('.remove-patio').forEach(b=>b.onclick=()=>{state.patio=state.patio.filter(x=>x.id!==b.dataset.id);save();render();});
   $('#patioDriverSelect')?.addEventListener('change',e=>{const d=state.drivers.find(x=>x.id===e.target.value);if(!d)return;$('#patioName').value=d.name||'';$('#patioPlate').value=d.plate||'';$('#patioHorse').value=d.horse||'S/N';$('#patioTyp').value=d.typology||$('#patioTyp').value;});
+
+  const patioSearch=$('#patioDriverSearch'), patioSelect=$('#patioDriverSelect');
+  if(patioSearch&&patioSelect)patioSearch.addEventListener('input',()=>{
+   const q=patioSearch.value.trim().toLowerCase();
+   [...patioSelect.options].forEach((o,i)=>{if(i===0)return;o.hidden=!!q&&!((o.dataset.search||o.textContent.toLowerCase()).includes(q))});
+  });
   setTimeout(()=>{const awb=$('#awbInput, input[name=awb], input[data-awb]');if(awb){awb.setAttribute('inputmode','none');awb.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();awb.form?.requestSubmit?.();setTimeout(()=>{awb.value='';awb.focus()},80)}})}},0);
   const startForm=$('#startForm');
   startForm?.addEventListener('submit',startReceiving);
@@ -1039,7 +1050,8 @@ async function startReceiving(e){
   if(state.active.some(a=>a.dock===dock)||state.docks.find(d=>d.number===dock)?.status!=='Livre')return toast('Esta doca está ocupada ou bloqueada.','error');
   startingReceiving=true;if(submit){submit.disabled=true;submit.textContent='Iniciando...';}
   const balance=planBalance(driver.typology),target=state.typologies.find(t=>t.name===driver.typology)?.targetMin||30;
-  const pr=state.priorities.find(p=>p.status==='Aguardando'&&(p.driverId===driver.id||p.plate.toUpperCase()===driver.plate.toUpperCase()));if(pr){pr.status='Atendida';pr.attendedAt=nowISO();pr.updatedAt=nowISO();}
+  const pr=state.priorities.find(p=>p.status==='Aguardando'&&(p.driverId===driver.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate)));
+  if(pr) state.priorities=state.priorities.filter(p=>p.id!==pr.id);
   const activeId=uid();
   state.active.push({id:activeId,driverId:driver.id,driverName:driver.name,plate:driver.plate,horse:driver.horse,typology:driver.typology,dock,operation:session.operation,expectedVolumes:balance.expected,targetMin:target,startedAt:nowISO(),startPhoto:photo,priority:!!pr,priorityId:pr?.id||null,priorityReason:pr?.reason||'',updatedAt:nowISO(),operator:session.name,hc,alert50:false,alert80:false,alert100:false,lastOvertimeAlert:0});
   state.patio=state.patio.filter(p=>p.driverId!==driver.id&&normalizeDriverPlate(p.plate)!==normalizeDriverPlate(driver.plate));
@@ -1047,7 +1059,7 @@ async function startReceiving(e){
   log('Iniciou descarregamento',`${driver.name} • Doca ${dock} • HC ${hc}`,false);
   save(false);
   pendingIncomingState=null;unlockReceivingOperation({applyPending:false,refresh:false});refreshUI(false);
-  if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),300)}
+  if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),60)}
 
 toast('Descarregamento iniciado e salvo.','ok');
 
@@ -1275,7 +1287,7 @@ async function finishReceiving(e,id){
 
   if(state.settings.supabaseEnabled){
    clearTimeout(syncTimer);
-   syncTimer=setTimeout(()=>syncCloud(true),300);
+   syncTimer=setTimeout(()=>syncCloud(true),60);
   }
 
   toast('Veículo finalizado, salvo e doca liberada.','ok');
@@ -1485,7 +1497,7 @@ async function closeOperationalDay(){
  stopCloudSession();clearTimeout(syncTimer);syncQueued=false;syncInFlight=false;
  const resetEpoch=Date.now(),stamp=nowISO();
  const keep={users:state.users.filter(u=>['tower','receiving','patio'].includes(u.role)),drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||stamp,updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch,lastEvent:null}};
- state={version:'11.0',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
+ state={version:'11.3',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
  enforceDefaultAccessAndDedupe();localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();lastAppliedCloudFingerprint=cloudFingerprint(state);
  try{
    initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
@@ -1500,9 +1512,9 @@ async function closeOperationalDay(){
 }
 
 let addingPlan=false;
-function addPlan(e){e.preventDefault();if(addingPlan)return;const btn=e.currentTarget?.querySelector('button[type="submit"]');const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');addingPlan=true;if(btn)btn.disabled=true;try{const duplicate=state.plan.some(x=>x.date===date&&x.typology===typology&&Number(x.vehicles)===vehicles&&Number(x.volumes)===volumes&&Number(x.weight||0)===weight&&(Date.now()-new Date(x.createdAt||0).getTime())<5000);if(duplicate)return toast('Este lançamento já foi registrado.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(true);e.currentTarget.reset();$('#planDate').value=new Date().toISOString().slice(0,10);render();toast('Programação cadastrada.','ok');if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),150)}}finally{addingPlan=false;if(btn&&document.body.contains(btn))btn.disabled=false}}
+function addPlan(e){e.preventDefault();if(addingPlan)return;const btn=e.currentTarget?.querySelector('button[type="submit"]');const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');addingPlan=true;if(btn)btn.disabled=true;try{const duplicate=state.plan.some(x=>x.date===date&&x.typology===typology&&Number(x.vehicles)===vehicles&&Number(x.volumes)===volumes&&Number(x.weight||0)===weight&&(Date.now()-new Date(x.createdAt||0).getTime())<5000);if(duplicate)return toast('Este lançamento já foi registrado.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(false);e.currentTarget.reset();$('#planDate').value=new Date().toISOString().slice(0,10);render();if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),60)}toast('Programação cadastrada.','ok');if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),60)}}finally{addingPlan=false;if(btn&&document.body.contains(btn))btn.disabled=false}}
 
-function addPriority(e){e.preventDefault();const driver=state.drivers.find(d=>d.id===$('#prioDriver').value&&d.status==='Ativo');if(!driver)return toast('Motorista não cadastrado ou inativo. Cadastre o motorista no Recebimento ou no Pátio.','error');if(state.priorities.some(p=>p.status==='Aguardando'&&p.driverId===driver.id))return toast('Este motorista já está na fila de prioridade.','error');const createdAt=nowISO(),p={id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()};state.priorities.push(p);log('Cadastrou prioridade',p.plate,false);save();toast(`${p.driverName} • ${p.plate} • ${p.typology}`,'priority',8000);render()}
+function addPriority(e){e.preventDefault();const driver=state.drivers.find(d=>d.id===$('#prioDriver').value&&d.status==='Ativo');if(!driver)return toast('Motorista não cadastrado ou inativo. Cadastre o motorista no Recebimento ou no Pátio.','error');if(state.priorities.some(p=>p.status==='Aguardando'&&p.driverId===driver.id))return toast('Este motorista já está na fila de prioridade.','error');const createdAt=nowISO(),p={id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()};state.priorities.push(p);log('Cadastrou prioridade',`${p.driverName} • ${p.plate} • ${p.typology}`,false);save(true);toast(`${p.driverName} • ${p.plate} • ${p.typology}`,'priority',8000);render();if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),60)}}
 function filterHistory(){const q=$('#historySearch').value.toLowerCase(),op=$('#historyOperation').value;$$('#historyTable tbody tr').forEach(tr=>tr.style.display=(!q||tr.innerText.toLowerCase().includes(q))&&(!op||tr.innerText.includes(op))?'':'none')}
 function exportExcel(){
  const audit=auditFileName();
@@ -1608,11 +1620,9 @@ function mergeStates(local,remote){
   merged[k]=mergeEntityArrays(local[k],remote[k],lt,rt);
  });
 
- // Programação da Torre
- // Nunca faz merge para evitar retorno de registros antigos.
- merged.plan = JSON.parse(JSON.stringify(
-  rt>lt ? (remote.plan||[]) : (local.plan||[])
- ));
+ // Programação da Torre: união por ID evita que um lançamento recém-feito
+ // desapareça quando outro aparelho recebe/manda uma versão quase simultânea.
+ merged.plan=mergeEntityArrays(local.plan,remote.plan,lt,rt);
 
  // Histórico
  // Nunca faz merge para evitar reaparecimento de recebimentos antigos.
@@ -1628,13 +1638,17 @@ function mergeStates(local,remote){
   rt
  ).map(({id,...x})=>x);
  merged.active=mergeEntityArrays(local.active,remote.active,lt,rt);
+ const activeDriverIds=new Set(merged.active.map(a=>a.driverId).filter(Boolean));
+ const activePlates=new Set(merged.active.map(a=>normalizeDriverPlate(a.plate)).filter(Boolean));
+ merged.patio=(merged.patio||[]).filter(p=>!activeDriverIds.has(p.driverId)&&!activePlates.has(normalizeDriverPlate(p.plate)));
+ merged.priorities=(merged.priorities||[]).filter(p=>!(p.status==='Aguardando'&&(activeDriverIds.has(p.driverId)||activePlates.has(normalizeDriverPlate(p.plate)))));
  const archivedIds=new Set(merged.turns.flatMap(t=>(t.records||[]).map(r=>r.id)));
  const completedIds=new Set([...merged.history.map(h=>h.id),...archivedIds]);
  merged.active=merged.active.filter(a=>!completedIds.has(a.id));
  merged.history=merged.history.filter(h=>!archivedIds.has(h.id));
  const occupied=new Set(merged.active.map(a=>a.dock));
  merged.docks=uniqueDocks(merged.docks).map(d=>({...d,status:occupied.has(d.number)?'Ocupada':(d.status==='Ocupada'?'Livre':d.status)}));
- merged.version='10.8';merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
+ merged.version='11.3';merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
  return keepOnlyCurrentOperationalDay(normalizeStateShape(merged));
 }
 function initSupabase(){
@@ -1684,9 +1698,9 @@ function initRealtime(){
  if(!cloudSessionAllowed())return;
  initSupabase();if(!supabaseClient||supabaseChannel)return;
  supabaseChannel=supabaseClient
-  .channel('crc-live-v109',{config:{broadcast:{self:false}}})
-  .on('postgres_changes',{event:'*',schema:'public',table:SUPABASE_TABLE,filter:`id=eq.${SUPABASE_ROW_ID}`},()=>scheduleCloudPull(90))
-  .on('broadcast',{event:'crc-change'},()=>scheduleCloudPull(45))
+  .channel('crc-live-v113',{config:{broadcast:{self:false}}})
+  .on('postgres_changes',{event:'*',schema:'public',table:SUPABASE_TABLE,filter:`id=eq.${SUPABASE_ROW_ID}`},()=>scheduleCloudPull(15))
+  .on('broadcast',{event:'crc-change'},()=>scheduleCloudPull(15))
   .subscribe(status=>{
     if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
       try{supabaseClient.removeChannel(supabaseChannel)}catch(e){}
@@ -1731,12 +1745,8 @@ async function pullCloud(force=false){
     const localStamp=state.meta?.updatedAt||'';
     const remoteStamp=incoming.meta?.updatedAt||'';
 
-    if(
-      force ||
-      !localStamp ||
-      (remoteStamp && remoteStamp>=localStamp)
-    ){
-      applyIncomingState(incoming,false);
+    if(!localDirty){
+      applyIncomingState(incoming,true);
     }
 
    }else{
@@ -1798,7 +1808,7 @@ async function syncCloud(silent=false){
 
   const sentStamp=payload.meta?.updatedAt||nowISO();
 
-  payload.version='11.0';
+  payload.version='11.3';
 
   payload.settings={
    ...(payload.settings||{}),
@@ -1824,6 +1834,7 @@ async function syncCloud(silent=false){
 
   state.settings.lastSync=nowISO();
 
+  if((state.meta?.updatedAt||'')===sentStamp){localDirty=false;persistLocalSnapshot();}
   lastAppliedCloudFingerprint=cloudFingerprint(payload);
 
   persistLocalSnapshot();
@@ -1832,9 +1843,11 @@ async function syncCloud(silent=false){
    await supabaseChannel?.send({
     type:'broadcast',
     event:'crc-change',
-    payload:{at:sentStamp,event:state.meta?.lastEvent||null}
+    payload:{at:sentStamp,revision:payload.meta?.revision||0,event:state.meta?.lastEvent||null}
    });
   }catch(e){}
+
+  setTimeout(()=>{if(!localDirty)pullCloud(true)},250);
 
   if((state.meta?.updatedAt||'')!==sentStamp)
    syncQueued=true;
@@ -1883,7 +1896,7 @@ async function clearAll(){
  if(!confirm('ZERAR TUDO que foi lançado? Serão apagados previsões, prioridades, recebimentos, veículos ativos e histórico. Usuários, motoristas, docas, tipologias e configurações serão mantidos. Somente os dados operacionais serão apagados.'))return;
  if(!confirm('Confirma a limpeza total dos dados operacionais? Esta ação não pode ser desfeita.'))return;
  const keep={users:state.users,drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||nowISO(),updatedAt:nowISO(),revision:Number(state.meta?.revision||0)+1}};
- state={version:'11.0',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
+ state={version:'11.3',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
  enforceDefaultAccessAndDedupe();
  localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();
  try{
@@ -1967,6 +1980,9 @@ document.addEventListener('submit',e=>{
  f.dataset.submitting='1';
  setTimeout(()=>{if(f)f.dataset.submitting='0'},900);
 },true);
+
+window.addEventListener('focus',()=>{if(state?.settings?.supabaseEnabled&&!localDirty)pullCloud(true)});
+window.addEventListener('pageshow',()=>{if(state?.settings?.supabaseEnabled&&!localDirty)pullCloud(true)});
 </script>
 
 
