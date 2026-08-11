@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V10.5</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V11.0 BASE ESTÁVEL + PÁTIO</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -163,7 +163,7 @@ body{background:#f4f6f9}
 .nav button{width:100%;border:0;background:transparent;color:#ffffffb9;padding:12px 13px;border-radius:8px;text-align:left;margin:3px 0;cursor:pointer;font-weight:700;font-size:12px;display:flex;gap:10px}
 .nav button:hover,.nav button.active{background:#ffffff12;color:#fff}.nav button.active{border-left:3px solid var(--red)}
 .nav-icon{width:24px}.side-footer{margin-top:auto;padding:14px;display:flex;gap:10px;align-items:center;border-top:1px solid #ffffff15}
-.side-footer small{display:block;opacity:.5}.dot{width:9px;height:9px;border-radius:50%;background:#22c55e}
+.side-footer small{display:block;opacity:.5}.dot{display:none!important}
 .shell{width:100%;margin-left:260px}.topbar{height:76px;position:sticky;top:0;z-index:20;background:#ffffffed;color:#202532;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:10px 20px;box-shadow:none}
 .page-title{min-width:220px}.page-title h1{font-size:19px;margin:0;color:var(--navy)}.page-title p{font-size:10px;color:var(--muted);margin:3px 0 0}
 .top-actions{margin-left:auto;display:flex;align-items:center;gap:9px}.shift-badge,.online-badge{font-size:10px;font-weight:800;padding:8px 10px;border-radius:99px;background:#f3f4f6}
@@ -319,8 +319,8 @@ body.crc-dark #app td{border-color:#2a354b}
     </div>
     <nav id="mainNav" class="nav"></nav>
     <div class="side-footer">
-      <span class="dot"></span>
-      <div><strong>Online</strong></div>
+      
+      <div><button id="manualRefreshSide" class="icon-btn" type="button" title="Atualizar sistema" aria-label="Atualizar sistema">↻</button></div>
     </div>
   </aside>
 
@@ -369,28 +369,18 @@ const stateChannel=('BroadcastChannel' in window)?new BroadcastChannel('crc_stat
 
 function seed(){
   const users=[
-    {id:uid(),name:'Administrador CRC',username:'admin',password:'admin',role:'admin',active:true},
+    {id:uid(),name:'Controle de Pátio',username:'patio',password:'patio',role:'patio',active:true},
     {id:uid(),name:'Torre de Controle',username:'torre',password:'torre',role:'tower',active:true},
-    {id:uid(),name:'Líder Operacional',username:'lider',password:'lider',role:'leader',active:true},
-    {id:uid(),name:'Recebimento Operacional',username:'recebimento',password:'recebimento',role:'receiving',active:true},
-    {id:uid(),name:'Assistente Operacional',username:'assistente',password:'assistente',role:'receiving',active:true}
+    {id:uid(),name:'Recebimento Operacional',username:'recebimento',password:'recebimento',role:'receiving',active:true}
   ];
   const typologies=[
     {name:'Fiorino',targetMin:20},{name:'VAN',targetMin:25},{name:'VUC',targetMin:30},
     {name:'3/4',targetMin:40},{name:'TOCO',targetMin:50},{name:'TRUCK',targetMin:70},{name:'Carreta',targetMin:90}
   ];
-  const plan=[
-    {id:uid(),date:new Date().toISOString().slice(0,10),typology:'3/4',vehicles:14,volumes:2760,weight:44957},
-    {id:uid(),date:new Date().toISOString().slice(0,10),typology:'Carreta',vehicles:3,volumes:2654,weight:58109},
-    {id:uid(),date:new Date().toISOString().slice(0,10),typology:'Fiorino',vehicles:11,volumes:337,weight:5561},
-    {id:uid(),date:new Date().toISOString().slice(0,10),typology:'TOCO',vehicles:7,volumes:1937,weight:44296},
-    {id:uid(),date:new Date().toISOString().slice(0,10),typology:'TRUCK',vehicles:5,volumes:2551,weight:68524},
-    {id:uid(),date:new Date().toISOString().slice(0,10),typology:'VAN',vehicles:8,volumes:384,weight:8592},
-    {id:uid(),date:new Date().toISOString().slice(0,10),typology:'VUC',vehicles:41,volumes:4550,weight:74656}
-  ];
+  const plan=[];
   const drivers=[];
   const docks=Array.from({length:14},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'10.4',users,typologies,plan,drivers,docks,active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'11.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -410,7 +400,7 @@ function chooseNewestLocalState(){
 let state=chooseNewestLocalState();
 
 function enforceDefaultAccessAndDedupe(){
- const defaults={admin:['Administrador CRC','admin','admin'],torre:['Torre de Controle','torre','tower'],lider:['Líder Operacional','lider','leader'],recebimento:['Recebimento Operacional','recebimento','receiving'],assistente:['Assistente Operacional','assistente','receiving']};
+ const defaults={patio:['Controle de Pátio','patio','patio'],torre:['Torre de Controle','torre','tower'],recebimento:['Recebimento Operacional','recebimento','receiving']};
  state.users=Array.isArray(state.users)?state.users:[];
  Object.entries(defaults).forEach(([username,[name,password,role]])=>{let u=state.users.find(x=>String(x.username||'').toLowerCase()===username);if(u){u.password=password;u.active=true;u.role=role}else state.users.push({id:uid(),name,username,password,role,active:true})});
  const seenUsers=new Set();
@@ -450,7 +440,7 @@ function uniqueDocks(docks=[]){
 }
 function normalizeStateShape(target){
  target=target&&typeof target==='object'?target:seed();
- ['users','typologies','plan','drivers','docks','active','history','priorities','logs','turns'].forEach(k=>{if(!Array.isArray(target[k]))target[k]=[]});
+ ['users','typologies','plan','drivers','docks','patio','active','history','priorities','logs','turns'].forEach(k=>{if(!Array.isArray(target[k]))target[k]=[]});
  target.docks=uniqueDocks(target.docks);
  target.meta=target.meta||{createdAt:nowISO(),updatedAt:nowISO(),revision:0};
  target.meta.deletedDrivers=Array.isArray(target.meta.deletedDrivers)?target.meta.deletedDrivers:[];
@@ -463,6 +453,18 @@ function normalizeStateShape(target){
  return target;
 }
 state=normalizeStateShape(state);
+function keepOnlyCurrentOperationalDay(target){
+ const today=localDateKey();
+ target.plan=(target.plan||[]).filter(x=>localDateKey(x.date||x.createdAt)===today);
+ target.history=(target.history||[]).filter(x=>localDateKey(x.finishedAt||x.updatedAt||x.createdAt)===today);
+ target.active=(target.active||[]).filter(x=>localDateKey(x.startedAt||x.updatedAt||x.createdAt)===today);
+ target.patio=(target.patio||[]).filter(x=>localDateKey(x.arrivedAt||x.updatedAt||x.createdAt)===today);
+ target.priorities=(target.priorities||[]).filter(x=>localDateKey(x.createdAt||x.updatedAt)===today);
+ target.logs=(target.logs||[]).filter(x=>localDateKey(x.at||x.createdAt||x.updatedAt)===today);
+ target.turns=[];
+ return target;
+}
+state=keepOnlyCurrentOperationalDay(state);
 state.settings=state.settings||{};
 state.settings.supabaseUrl=SUPABASE_URL;
 state.settings.supabaseKey=SUPABASE_KEY;
@@ -479,7 +481,7 @@ function stateStamp(obj){
 }
 function cloudFingerprint(obj){
  const m=obj?.meta||{};
- return [m.updatedAt||'',Number(m.revision||0),m.lastEvent?.id||'',(obj?.drivers||[]).length,(obj?.docks||[]).length,(obj?.plan||[]).length,(obj?.active||[]).length,(obj?.history||[]).length,(obj?.priorities||[]).length].join('|');
+ return [m.updatedAt||'',Number(m.revision||0),m.lastEvent?.id||'',(obj?.drivers||[]).length,(obj?.docks||[]).length,(obj?.patio||[]).length,(obj?.plan||[]).length,(obj?.active||[]).length,(obj?.history||[]).length,(obj?.priorities||[]).length].join('|');
 }
 function shouldApplyIncoming(incoming){
  if(!incoming||typeof incoming!=='object')return false;
@@ -522,13 +524,13 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='10.6';
+ state.version='10.8';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
  persistLocalSnapshot();
  try{stateChannel?.postMessage({type:'state-updated',at:state.meta.updatedAt,revision:state.meta.revision})}catch(e){}
- if(sync&&state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),250)}
+ if(sync&&state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),700)}
 }
 function saveDeferred(sync=true){
  clearTimeout(saveDeferred._t);
@@ -588,31 +590,97 @@ function applyIncomingState(incoming,force=false){
   return true;
  }
  const localSettings={...(state.settings||{})};
- state=mergeStates(state,incoming);enforceDefaultAccessAndDedupe();state.settings={...(state.settings||{}),supabaseUrl:localSettings.supabaseUrl||state.settings?.supabaseUrl||'',supabaseKey:localSettings.supabaseKey||'',supabaseEnabled:localSettings.supabaseEnabled??state.settings?.supabaseEnabled??false};
- lastAppliedCloudFingerprint=cloudFingerprint(state);
- persistLocalSnapshot();
- const evt=state.meta?.lastEvent;if(evt?.id&&evt.id!==lastNotifiedEventId&&evt.user!==session?.name){lastNotifiedEventId=evt.id;toast(`${evt.action}${evt.detail?' • '+evt.detail:''}`,'ok',6500)}
- if(isEditingUI()){scheduleVisualRefresh(500);return true;}refreshUI(true);return true;
+ // Faz uma cópia segura
+const incomingState=JSON.parse(JSON.stringify(incoming));
+
+// Remove duplicados
+enforceIncomingDedupe(incomingState);
+
+// Mantém no estado operacional somente os registros do dia atual.
+keepOnlyCurrentOperationalDay(incomingState);
+state=mergeStates(state,incomingState);
+state=keepOnlyCurrentOperationalDay(state);
+
+enforceDefaultAccessAndDedupe();
+
+state.settings={
+ ...(state.settings||{}),
+ supabaseUrl:localSettings.supabaseUrl||state.settings?.supabaseUrl||'',
+ supabaseKey:localSettings.supabaseKey||'',
+ supabaseEnabled:localSettings.supabaseEnabled??state.settings?.supabaseEnabled??false
+};
+
+lastAppliedCloudFingerprint=cloudFingerprint(state);
+
+persistLocalSnapshot();
+
+const evt=state.meta?.lastEvent;
+
+if(evt?.id&&evt.id!==lastNotifiedEventId&&evt.user!==session?.name){
+
+ lastNotifiedEventId=evt.id;
+
+ toast(`${evt.action}${evt.detail?' • '+evt.detail:''}`,'ok',6500);
+
 }
-function log(action,detail='',persist=true){if(session){const eventId=uid(),at=nowISO();state.logs.unshift({id:eventId,at,user:session.name,role:session.role,operation:session.operation,action,detail});state.meta=state.meta||{};state.meta.lastEvent={id:eventId,at,user:session.name,role:session.role,action,detail}}if(persist)save(true)}
-function toast(msg,type='',duration=7000){
- const d=document.createElement('div');
- const titles={error:'Atenção',ok:'Concluído',attention:'Atenção de tempo',warning:'Alerta de tempo',overtime:'Tempo excedido',priority:'Veículo prioritário'};
- d.className='toast '+type;d.innerHTML=`<strong>${titles[type]||'CRC'}</strong><div>${esc(msg)}</div>`;
- d.style.touchAction='pan-y';
- let startX=0,currentX=0,dragging=false,removed=false;
- const removeToast=()=>{if(removed)return;removed=true;d.style.transition='transform .2s ease,opacity .2s ease';d.style.transform='translateX(120%)';d.style.opacity='0';setTimeout(()=>d.remove(),220)};
- d.addEventListener('pointerdown',e=>{startX=e.clientX;currentX=0;dragging=true;d.setPointerCapture?.(e.pointerId);d.style.transition='none'});
- d.addEventListener('pointermove',e=>{if(!dragging)return;currentX=Math.max(0,e.clientX-startX);d.style.transform=`translateX(${currentX}px)`;d.style.opacity=String(Math.max(.25,1-currentX/260))});
- const finishSwipe=()=>{if(!dragging)return;dragging=false;if(currentX>=85)removeToast();else{d.style.transition='transform .18s ease,opacity .18s ease';d.style.transform='translateX(0)';d.style.opacity='1'}};
+
+if(isEditingUI()){
+
+ scheduleVisualRefresh(500);
+
+ return true;
+
+}
+
+refreshUI(true);
+
+return true;
  d.addEventListener('pointerup',finishSwipe);d.addEventListener('pointercancel',finishSwipe);
  $('#toasts').appendChild(d);setTimeout(removeToast,duration);
 }
-function roleName(r){return({admin:'Administrador',tower:'Torre de Controle',leader:'Líder',receiving:'Recebimento Operacional'})[r]||r}
+
+function toast(message,type='ok',duration=4200){
+ const host=$('#toasts');
+ if(!host)return;
+ const d=document.createElement('div');
+ d.className=`toast ${type}`;
+ d.innerHTML=`<div>${esc(String(message||''))}</div>`;
+ host.appendChild(d);
+ const remove=()=>{if(!d.isConnected)return;d.style.opacity='0';d.style.transform='translateX(24px)';setTimeout(()=>d.remove(),180)};
+ setTimeout(remove,duration);
+}
+
+function log(action,detail='',autoSave=true){
+ state.logs=Array.isArray(state.logs)?state.logs:[];
+ const item={
+  id:uid(),
+  action:String(action||'Ação'),
+  detail:String(detail||''),
+  user:session?.name||session?.accountName||'Sistema',
+  role:session?.role||'system',
+  operation:session?.operation||'Geral',
+  createdAt:nowISO(),
+  updatedAt:nowISO()
+ };
+ state.logs.unshift(item);
+ if(state.logs.length>1500)state.logs=state.logs.slice(0,1500);
+ state.meta=state.meta||{};
+ state.meta.lastEvent={
+  id:item.id,
+  action:item.action,
+  detail:item.detail,
+  user:item.user,
+  at:item.createdAt
+ };
+ if(autoSave)save();
+ return item;
+}
+
+function roleName(r){return({patio:'Controle de Pátio',tower:'Torre de Controle',receiving:'Recebimento Operacional'})[r]||r}
 function can(...roles){return session&&roles.includes(session.role)}
-function isVisible(page){const map={dashboard:['admin','tower','leader','receiving'],receiving:['admin','receiving'],planning:['admin','tower'],priorities:['admin','tower'],history:['admin','tower','leader','receiving'],drivers:['admin','leader','receiving'],docks:['admin','leader'],admin:['admin'],logs:['admin']};return (map[page]||[]).includes(session.role)}
+function isVisible(page){const map={dashboard:['tower','receiving','patio'],patio:['patio'],receiving:['receiving'],planning:['tower'],priorities:['tower','patio'],history:['tower','receiving'],drivers:['tower','receiving'],docks:[],admin:[],logs:[]};return (map[page]||[]).includes(session.role)}
 const navItems=[
-  ['dashboard','📊','Painel Geral'],['receiving','🚚','Recebimento'],['planning','🗓️','Previsão da Torre'],
+  ['dashboard','📊','Painel Geral'],['patio','🅿️','Carros no Pátio'],['receiving','🚚','Recebimento'],['planning','🗓️','Previsão da Torre'],
   ['priorities','🚨','Prioridades'],['history','📋','Lista / Histórico'],['drivers','👨‍✈️','Motoristas'],
   ['docks','🚪','Docas'],['admin','⚙️','Administração'],['logs','🕘','Histórico do Sistema']
 ];
@@ -621,14 +689,18 @@ function renderNav(){
   $('#mainNav').onclick=e=>{const b=e.target.closest('button[data-page]');if(b){const nextPage=b.dataset.page;if(currentPage==='receiving'&&nextPage!=='receiving'&&receivingOperationLocked)unlockReceivingOperation({applyPending:true,refresh:false});currentPage=nextPage;render()}};
 }
 function stats(){
-  const plannedV=state.plan.reduce((a,b)=>a+Number(b.vehicles||0),0), plannedVol=state.plan.reduce((a,b)=>a+Number(b.volumes||0),0);
-  const receivedV=state.history.length, receivedVol=state.history.reduce((a,b)=>a+Number(b.receivedVolumes||0),0);
-  const activeVol=state.active.reduce((a,b)=>a+Number(b.expectedVolumes||0),0);
-  const avg=state.history.length?Math.round(state.history.reduce((a,b)=>a+Number(b.durationMin||0),0)/state.history.length):0;
-  const rate=state.history.length?state.history.reduce((a,b)=>a+Number(b.receivedVolumes||0),0)/Math.max(1,state.history.reduce((a,b)=>a+Number(b.durationMin||0),0)):0;
-  const remaining=Math.max(0,plannedVol-receivedVol), eta=rate?Math.round(remaining/rate):0;
-  const activeHC=state.active.reduce((a,b)=>a+Number(b.hc||0),0);
-  return {plannedV,plannedVol,receivedV,receivedVol,pendingV:Math.max(0,plannedV-receivedV),pendingVol:remaining,active:state.active.length,activeHC,avg,eta,free:state.docks.filter(d=>d.status==='Livre').length,busy:state.docks.filter(d=>d.status==='Ocupada').length};
+ const today=localDateKey();
+ const plan=state.plan;
+ const history=state.history;
+ const active=state.active;
+ const patio=state.patio;
+ const plannedV=plan.reduce((a,b)=>a+Number(b.vehicles||0),0),plannedVol=plan.reduce((a,b)=>a+Number(b.volumes||0),0);
+ const receivedV=history.length,receivedVol=history.reduce((a,b)=>a+Number(b.receivedVolumes||0),0);
+ const avg=history.length?Math.round(history.reduce((a,b)=>a+Number(b.durationMin||0),0)/history.length):0;
+ const rate=history.length?receivedVol/Math.max(1,history.reduce((a,b)=>a+Number(b.durationMin||0),0)):0;
+ const remaining=Math.max(0,plannedVol-receivedVol),eta=rate?Math.round(remaining/rate):0;
+ const activeHC=active.reduce((a,b)=>a+Number(b.hc||0),0);
+ return {plannedV,plannedVol,receivedV,receivedVol,pendingV:Math.max(0,plannedV-receivedV),pendingVol:remaining,active:active.length,patio:patio.length,activeHC,avg,eta,free:state.docks.filter(d=>d.status==='Livre').length,busy:state.docks.filter(d=>d.status==='Ocupada').length};
 }
 function waitingPriorities(){
  return state.priorities.filter(p=>p.status==='Aguardando').sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
@@ -639,7 +711,7 @@ function priorityCards(){
 }
 function kpis(){
   const s=stats(),queue=waitingPriorities();
-  const regular=[['Carros previstos',s.plannedV,'planejamento'],['Carros recebidos',s.receivedV,'finalizados'],['Carros pendentes',s.pendingV,'a receber'],['Volumes previstos',s.plannedVol.toLocaleString('pt-BR'),'total'],['Volumes recebidos',s.receivedVol.toLocaleString('pt-BR'),'real'],['Volumes pendentes',s.pendingVol.toLocaleString('pt-BR'),'saldo'],['Em descarga',s.active,'agora'],['HC em operação',s.activeHC,'pessoas nas docas'],['Docas livres',s.free,'disponíveis'],['Docas ocupadas',s.busy,'em uso'],['Tempo médio',s.avg+' min','por carro'],['Previsão término',s.eta?Math.floor(s.eta/60)+'h '+s.eta%60+'min':'—','estimativa']];
+  const regular=[['Carros previstos',s.plannedV,'planejamento'],['Carros recebidos',s.receivedV,'finalizados'],['Carros pendentes',s.pendingV,'a receber'],['Volumes previstos',s.plannedVol.toLocaleString('pt-BR'),'total'],['Volumes recebidos',s.receivedVol.toLocaleString('pt-BR'),'real'],['Volumes pendentes',s.pendingVol.toLocaleString('pt-BR'),'saldo'],['No pátio',s.patio,'aguardando'],['Em descarga',s.active,'agora'],['HC em operação',s.activeHC,'pessoas nas docas'],['Docas livres',s.free,'disponíveis'],['Docas ocupadas',s.busy,'em uso'],['Tempo médio',s.avg+' min','por carro'],['Previsão término',s.eta?Math.floor(s.eta/60)+'h '+s.eta%60+'min':'—','estimativa']];
   return `<div class="cards">${regular.map(x=>`<div class="kpi"><small>${x[0]}</small><strong>${x[1]}</strong><em>${x[2]}</em></div>`).join('')}<div class="kpi priority-kpi"><small>Prioridades</small><strong>${queue.length}</strong><em>aguardando</em></div>${priorityCards()}</div>`;
 }
 function pageHead(title,desc,actions=''){return `<div class="page-head"><div><h2>${title}</h2><p>${desc}</p></div><div class="page-actions">${actions}</div></div>`}
@@ -650,8 +722,8 @@ function render(){
   $('#topUser').textContent=session.name;$('#topRole').textContent=session.role==='receiving'?`${roleName(session.role)} • ${session.operation}`:roleName(session.role);$('#operationBadge').textContent=`Operação ${session.operation}`;$('#operationBadge').style.display=session.role==='receiving'?'':'none';$('#avatar').textContent=session.name.split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase();
   renderNav();
   if(!isVisible(currentPage)) currentPage='dashboard';
-  const fn={dashboard:renderDashboard,receiving:renderReceiving,planning:renderPlanning,priorities:renderPriorities,history:renderHistory,drivers:renderDrivers,docks:renderDocks,admin:renderAdmin,logs:renderLogs}[currentPage];
-  $('#page').innerHTML=fn();bindThemeButton();const pageLabels={dashboard:['Painel Geral','Visão consolidada do recebimento'],receiving:['Recebimento','Controle operacional das docas'],planning:['Previsão da Torre','Lançamento de veículos, volumes e peso'],priorities:['Prioridades','Veículos prioritários'],history:['Lista / Histórico','Recebimentos finalizados'],drivers:['Motoristas','Cadastro de motoristas e veículos'],docks:['Docas','Controle de disponibilidade'],admin:['Administração','Configurações do CRC'],logs:['Histórico do Sistema','Auditoria completa']};const pl=pageLabels[currentPage]||['CRC','Controle de Recebimento de Coletas'];$('#topPageTitle').textContent=pl[0];$('#topSubtitle').textContent=pl[1];bindPage();
+  const fn={dashboard:renderDashboard,patio:renderPatio,receiving:renderReceiving,planning:renderPlanning,priorities:renderPriorities,history:renderHistory,drivers:renderDrivers,docks:renderDocks,admin:renderAdmin,logs:renderLogs}[currentPage];
+  $('#page').innerHTML=fn();bindThemeButton();const pageLabels={dashboard:['Painel Geral','Visão consolidada do recebimento'],patio:['Carros no Pátio','Controle de veículos presentes no pátio'],receiving:['Recebimento','Controle operacional das docas'],planning:['Previsão da Torre','Lançamento de veículos, volumes e peso'],priorities:['Prioridades','Veículos prioritários'],history:['Lista / Histórico','Recebimentos finalizados'],drivers:['Motoristas','Cadastro de motoristas e veículos'],docks:['Docas','Controle de disponibilidade'],admin:['Administração','Configurações do CRC'],logs:['Histórico do Sistema','Auditoria completa']};const pl=pageLabels[currentPage]||['CRC','Controle de Recebimento de Coletas'];$('#topPageTitle').textContent=pl[0];$('#topSubtitle').textContent=pl[1];bindPage();
 }
 function showLogin(){
  $('#loginScreen').classList.remove('hidden');$('#app').classList.add('hidden');
@@ -665,8 +737,8 @@ function dockPanel(){
 }
 function performanceTable(){
  const docks=uniqueDocks(state.docks);
- const rows=docks.map(d=>{const h=state.history.filter(x=>normalizeDockNumber(x.dock)===d.number);const avg=h.length?Math.round(h.reduce((a,b)=>a+Number(b.durationMin||0),0)/h.length):0;const vol=h.reduce((a,b)=>a+Number(b.receivedVolumes||0),0);const prod=h.length?vol/Math.max(1,h.reduce((a,b)=>a+Number(b.durationMin||0),0)):0;return {dock:d.number,count:h.length,avg,prod}}).sort((a,b)=>b.count-a.count||a.dock.localeCompare(b.dock,undefined,{numeric:true}));
- return `<div class="panel"><div class="panel-title"><h3>Desempenho das docas</h3><span class="small">Produção do histórico atual</span></div><div class="table-wrap"><table><thead><tr><th>Doca</th><th>Veículos</th><th>Tempo médio</th><th>Volumes/min</th></tr></thead><tbody>${rows.map(r=>`<tr><td>Doca ${r.dock}</td><td>${r.count}</td><td>${r.avg||'—'}${r.avg?' min':''}</td><td>${r.prod?r.prod.toFixed(2):'—'}</td></tr>`).join('')}</tbody></table></div></div>`;
+ const rows=docks.map(d=>{const h=state.history.filter(x=>normalizeDockNumber(x.dock)===d.number);const avg=h.length?Math.round(h.reduce((a,b)=>a+Number(b.durationMin||0),0)/h.length):0;const vol=h.reduce((a,b)=>a+Number(b.receivedVolumes||0),0);const prod=h.length?Math.round(vol/Math.max(1,h.reduce((a,b)=>a+Number(b.durationMin||0),0))):0;return {dock:d.number,count:h.length,avg,prod}}).sort((a,b)=>b.count-a.count||a.dock.localeCompare(b.dock,undefined,{numeric:true}));
+ return `<div class="panel"><div class="panel-title"><h3>Desempenho das docas</h3><span class="small">Produção do histórico atual</span></div><div class="table-wrap"><table><thead><tr><th>Doca</th><th>Veículos</th><th>Tempo médio</th><th>Volumes/min</th></tr></thead><tbody>${rows.map(r=>`<tr><td>Doca ${r.dock}</td><td>${r.count}</td><td>${r.avg||'—'}${r.avg?' min':''}</td><td>${r.prod?`${r.prod} vls/minuto`:'—'}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 function localDateKey(value){
  const d=value?new Date(value):new Date();
@@ -800,23 +872,51 @@ function activeCards(showFinalize=true){
  return `<div class="panel"><div class="panel-title"><h3>Veículos atuais nas docas</h3><span class="small">${state.active.length} em descarregamento</span></div><div class="vehicle-grid">${
  state.active.length?state.active.sort((a,b)=>a.dock.localeCompare(b.dock)).map(a=>{
    const elapsed=mins(Date.now()-new Date(a.startedAt));const pct=Math.min(100,Math.round(elapsed/a.targetMin*100));const cls=pct>=100?'over':pct>=80?'danger':pct>=50?'warn':'';
-   return `<article class="vehicle-card ${a.priority?'priority':''}" data-active="${a.id}"><div class="vc-head"><span class="badge ${a.priority?'badge-red':'badge-blue'}">${a.priority?'🚨 PRIORIDADE':'DOCA '+esc(a.dock)}</span><span class="badge badge-purple">${esc(a.operation)}</span></div><div class="vc-body"><h4>${esc(a.driverName)}</h4><p>${esc(a.typology)} • ${esc(a.plate)} • Cavalo ${esc(a.horse)}</p><p><b>Previsto:</b> ${a.expectedVolumes.toLocaleString('pt-BR')} volumes • <b>HC:</b> ${Number(a.hc||1)}</p><div class="timer" data-start="${a.startedAt}">00:00:00</div><div class="progress ${cls}"><span style="width:${pct}%"></span></div><p>Meta: ${a.targetMin} min • Início: ${new Date(a.startedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p>${showFinalize&&can('admin','leader','receiving')?`<div class="card-actions"><button class="btn btn-danger finalize-btn" data-id="${a.id}">Finalizar</button><button class="btn btn-soft view-start-photo" data-id="${a.id}">Foto inicial</button></div>`:''}</div></article>`
+   return `<article class="vehicle-card ${a.priority?'priority':''}" data-active="${a.id}"><div class="vc-head"><span class="badge ${a.priority?'badge-red':'badge-blue'}">${a.priority?'🚨 PRIORIDADE':'DOCA '+esc(a.dock)}</span><span class="badge badge-purple">${esc(a.operation)}</span></div><div class="vc-body"><h4>${esc(a.driverName)}</h4><p>${esc(a.typology)} • ${esc(a.plate)} • Cavalo ${esc(a.horse)}</p><p><b>Previsto:</b> ${a.expectedVolumes.toLocaleString('pt-BR')} volumes • <b>HC:</b> ${Number(a.hc||1)}</p><div class="timer" data-start="${a.startedAt}">00:00:00</div><div class="progress ${cls}"><span style="width:${pct}%"></span></div><p>Meta: ${a.targetMin} min • Início: ${new Date(a.startedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p>${showFinalize&&can('admin','leader','receiving')?`<div class="card-actions"><button class="btn btn-danger finalize-btn" data-id="${a.id}">Finalizar</button><button class="btn btn-soft share-start-photo" data-id="${a.id}" title="Compartilhar início no WhatsApp" aria-label="Compartilhar início no WhatsApp"><svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M16 3a13 13 0 0 0-11.1 19.8L3 29l6.4-1.7A13 13 0 1 0 16 3Zm0 23.6c-2 0-3.9-.5-5.6-1.5l-.4-.2-3.8 1 1-3.7-.3-.4A10.6 10.6 0 1 1 16 26.6Zm5.8-7.9c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.2-.2.2-.3.2-.7.1-1.8-.9-3-1.6-4.2-3.6-.3-.5.3-.5.9-1.6.1-.2.1-.4 0-.6-.1-.2-.7-1.7-1-2.3-.3-.7-.6-.6-.8-.6h-.7c-.2 0-.6.1-.9.4-.3.3-1.2 1.2-1.2 2.9s1.2 3.3 1.4 3.6c.2.2 2.4 3.7 5.9 5.2.8.4 1.5.6 2 .7.8.3 1.6.2 2.2.1.7-.1 1.9-.8 2.2-1.5.3-.7.3-1.4.2-1.5-.1-.1-.3-.2-.6-.3Z"/></svg></button></div>`:''}</div></article>`
  }).join(''):`<div class="small">Nenhum veículo em descarregamento agora.</div>`}</div></div>`;
+}
+function renderPatio(){
+ const today=localDateKey();
+ const rows=state.patio.slice().sort((a,b)=>new Date(a.arrivedAt)-new Date(b.arrivedAt));
+ return pageHead('Carros no Pátio','Cadastre somente os veículos que estão fisicamente no pátio.')+
+ `<div class="panel"><form id="patioForm"><div class="form-grid">
+ <div class="span2"><label>Motorista já cadastrado (opcional)</label><select id="patioDriverSelect"><option value="">Novo motorista / digitar abaixo</option>${state.drivers.filter(d=>d.status==='Ativo').sort((a,b)=>a.name.localeCompare(b.name)).map(d=>`<option value="${d.id}">${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`).join('')}</select></div>
+ <div><label>Motorista</label><input id="patioName" required></div>
+ <div><label>Placa</label><input id="patioPlate" required></div>
+ <div><label>Cavalo</label><input id="patioHorse" value="S/N"></div>
+ <div><label>Tipologia</label><select id="patioTyp">${state.typologies.map(t=>`<option>${esc(t.name)}</option>`).join('')}</select></div>
+ <div style="align-self:end"><button class="btn btn-primary" type="submit">Adicionar ao pátio</button></div>
+ </div></form></div>
+ <div class="panel"><div class="panel-title"><h3>Veículos no pátio</h3><span class="small">${rows.length} aguardando doca</span></div>
+ <div class="table-wrap"><table><thead><tr><th>Chegada</th><th>Motorista</th><th>Placa</th><th>Cavalo</th><th>Tipologia</th><th>Ação</th></tr></thead>
+ <tbody>${rows.length?rows.map(x=>`<tr><td>${brDate(x.arrivedAt)}</td><td>${esc(x.driverName)}</td><td><b>${esc(x.plate)}</b></td><td>${esc(x.horse||'S/N')}</td><td>${esc(x.typology)}</td><td><button class="btn btn-danger remove-patio" data-id="${x.id}">Retirar</button></td></tr>`).join(''):`<tr><td colspan="6" class="small">Nenhum carro no pátio.</td></tr>`}</tbody></table></div></div>`;
+}
+function addPatioVehicle(e){
+ e.preventDefault();
+ const name=normalizeDriverName($('#patioName').value),plate=normalizeDriverPlate($('#patioPlate').value),horse=normalizeDriverPlate($('#patioHorse').value)||'S/N',typology=$('#patioTyp').value;
+ if(!name||!plate||!typology)return toast('Informe motorista, placa e tipologia.','error');
+ if(state.patio.some(x=>normalizeDriverPlate(x.plate)===plate))return toast('Este veículo já está no pátio.','error');
+ let driver=state.drivers.find(x=>normalizeDriverPlate(x.plate)===plate);
+ if(driver)Object.assign(driver,{name,horse,typology,status:'Ativo',updatedAt:nowISO()});
+ else{driver={id:uid(),name,plate,horse,typology,status:'Ativo',createdAt:nowISO(),updatedAt:nowISO()};state.drivers.push(driver)}
+ state.patio.push({id:uid(),driverId:driver.id,driverName:name,plate,horse,typology,arrivedAt:nowISO(),createdAt:nowISO(),updatedAt:nowISO()});
+ log('Entrada no pátio',`${name} • ${plate}`,false);save(true);render();toast('Veículo adicionado ao pátio.','ok');if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),150)}
 }
 function renderReceiving(){
  return pageHead('Recebimento Operacional','Selecione o motorista, confirme a doca, registre a foto e inicie a descarga.')+
  `<div class="receiving-priority-strip"><div class="cards"><div class="kpi priority-kpi"><small>Prioridades</small><strong>${waitingPriorities().length}</strong><em>aguardando</em></div>${priorityCards()}</div></div><div class="panel"><div class="panel-title"><h3>Iniciar descarregamento</h3><span class="small">A doca fica bloqueada até a finalização</span></div>
  <form id="startForm"><div class="receiving-form-grid">
- <div class="span2"><label>Motorista</label><input id="driverSearch" type="search" placeholder="Pesquisar nome do motorista..." autocomplete="off"><select id="driverSelect" required style="margin-top:8px"><option value="">Selecione...</option>${state.drivers.filter(d=>d.status==='Ativo'&&!state.active.some(a=>a.driverId===d.id)).sort((a,b)=>{const ap=waitingPriorities().some(p=>p.driverId===a.id),bp=waitingPriorities().some(p=>p.driverId===b.id);return Number(bp)-Number(ap)||a.name.localeCompare(b.name)}).map(d=>{const pr=waitingPriorities().find(p=>p.driverId===d.id);return `<option value="${d.id}" data-search="${esc((d.name+' '+d.plate+' '+d.typology).toLowerCase())}">${pr?'🚨 PRIORIDADE — ':''}${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`}).join('')}</select></div>
- <div><label>Placa</label><input id="driverPlateView" class="readonly-field" readonly placeholder="Automático"></div>
- <div><label>Cavalo</label><input id="driverHorseView" class="readonly-field" readonly placeholder="Automático"></div>
- <div><label>Tipologia</label><input id="driverTypView" class="readonly-field" readonly placeholder="Automático"></div>
+ <div class="span2"><label>Motorista</label><input id="driverSearch" type="search" placeholder="Pesquisar nome do motorista..." autocomplete="off"><select id="driverSelect" required style="margin-top:8px"><option value="">Selecione...</option>${state.drivers.filter(d=>d.status==='Ativo'&&!state.active.some(a=>a.driverId===d.id)).sort((a,b)=>{const ap=state.patio.some(p=>p.driverId===a.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(a.plate)),bp=state.patio.some(p=>p.driverId===b.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(b.plate));const apr=waitingPriorities().some(p=>p.driverId===a.id),bpr=waitingPriorities().some(p=>p.driverId===b.id);return Number(bp)-Number(ap)||Number(bpr)-Number(apr)||a.name.localeCompare(b.name)}).map(d=>{const pr=waitingPriorities().find(p=>p.driverId===d.id);const inPatio=state.patio.some(p=>p.driverId===d.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(d.plate));return `<option value="${d.id}" data-search="${esc((d.name+' '+d.plate+' '+d.typology+' '+(inPatio?'patio':'')).toLowerCase())}">${inPatio?'🅿️ PÁTIO — ':''}${pr?'🚨 PRIORIDADE — ':''}${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`}).join('')}</select></div>
+ <div><label>Placa</label><input id="driverPlateView" placeholder="Automático — pode corrigir"></div>
+ <div><label>Cavalo</label><input id="driverHorseView" placeholder="Automático — pode corrigir"></div>
+ <div><label>Tipologia</label><input id="driverTypView" placeholder="Automático — pode corrigir"></div>
  <div><label>Doca</label><select id="dockSelect" required><option value="">Selecione...</option>${state.docks.filter(d=>d.status==='Livre').map(d=>`<option>${esc(d.number)}</option>`).join('')}</select></div>
  <div><label>Operação</label><input value="${esc(session.operation)}" class="readonly-field" readonly></div>
  <div><label>HC na doca</label><input id="hcCount" type="number" min="1" max="30" value="1" required></div>
  <div><label>Foto do veículo aberto</label><button id="openStartCameraBtn" class="btn btn-soft photo-button" type="button">📷 Abrir câmera</button><input id="startPhotoData" type="hidden"></div>
  <div class="full"><button class="btn btn-primary" type="submit">Iniciar descarregamento</button></div>
- </div></form></div>${activeCards(true)}`;
+ </div></form></div>
+ ${activeCards(true)}`;
 }
 function planBalance(typology){
  const p=state.plan.filter(x=>x.typology===typology).reduce((a,b)=>({vehicles:a.vehicles+b.vehicles,volumes:a.volumes+b.volumes,weight:a.weight+b.weight}),{vehicles:0,volumes:0,weight:0});
@@ -826,7 +926,8 @@ function planBalance(typology){
  return {expected:p.vehicles<=0?0:(remV?Math.max(0,Math.round(remVol/remV)):0),...p};
 }
 function renderPlanning(){
- return pageHead('Previsão da Torre','Lançamento manual da previsão por tipologia.') +
+ return pageHead('Previsão da Torre','Lançamento da programação do ciclo operacional. O ciclo pode atravessar a madrugada até a Torre finalizá-lo.',
+ `<button id="closeDayBtn" class="btn btn-danger">📥 Finalizar ciclo, baixar e zerar</button>`) +
  `<div class="panel"><div class="panel-title"><h3>Novo lançamento manual</h3></div><form id="planForm"><div class="form-grid">
  <div><label>Data</label><input id="planDate" type="date" value="${new Date().toISOString().slice(0,10)}" required></div>
  <div><label>Tipologia</label><select id="planTyp" required>${state.typologies.map(t=>`<option>${esc(t.name)}</option>`).join('')}</select></div>
@@ -835,19 +936,19 @@ function renderPlanning(){
  <div><label>Peso previsto</label><input id="planWeight" type="number" min="0" step="0.01" required></div>
  <div style="align-self:end"><button class="btn btn-primary" type="submit">Adicionar previsão</button></div>
  </div></form></div>
- <div class="panel"><div class="panel-title"><h3>Previsão lançada</h3><span class="small">Dados de demonstração já incluídos</span></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipologia</th><th>Veículos</th><th>Volumes</th><th>Peso</th><th>Média por carro</th><th>Ação</th></tr></thead><tbody>${state.plan.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.typology)}</td><td>${p.vehicles}</td><td>${p.volumes.toLocaleString('pt-BR')}</td><td>${Number(p.weight).toLocaleString('pt-BR')}</td><td>${Math.round(p.volumes/p.vehicles)}</td><td><button class="btn btn-danger delete-plan" data-id="${p.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>`+noShowPanel();
+ <div class="panel"><div class="panel-title"><h3>Previsão lançada</h3><span class="small">Somente a previsão operacional do dia</span></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipologia</th><th>Veículos</th><th>Volumes</th><th>Peso</th><th>Média por carro</th><th>Ação</th></tr></thead><tbody>${state.plan.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.typology)}</td><td>${p.vehicles}</td><td>${p.volumes.toLocaleString('pt-BR')}</td><td>${Number(p.weight).toLocaleString('pt-BR')}</td><td>${Math.round(p.volumes/p.vehicles)}</td><td><button class="btn btn-danger delete-plan" data-id="${p.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>`+noShowPanel();
 }
 function renderPriorities(){
- const available=state.drivers.filter(d=>d.status==='Ativo').sort((a,b)=>a.name.localeCompare(b.name));
+ const available=state.drivers.filter(d=>d.status==='Ativo'&&(session.role!=='patio'||state.patio.some(p=>p.driverId===d.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(d.plate)))).sort((a,b)=>a.name.localeCompare(b.name));
  return pageHead('Prioridades','Veículos prioritários.')+
- `<div class="panel"><form id="priorityForm"><div class="form-grid"><div class="full"><label>Motorista cadastrado</label><select id="prioDriver" required><option value="">Selecione...</option>${available.map(d=>`<option value="${d.id}">${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`).join('')}</select><p class="small">Não encontrou o motorista? Solicite ao Líder o cadastro antes de lançar a prioridade.</p></div><div><label>Placa</label><input id="prioPlate" class="readonly-field" readonly></div><div><label>Cavalo</label><input id="prioHorse" class="readonly-field" readonly></div><div><label>Tipologia</label><input id="prioTyp" class="readonly-field" readonly></div><div><label>Quantidade prevista calculada</label><input id="prioExpectedVolumes" type="number" min="0" readonly class="readonly-field"></div><div><label>Motivo (opcional)</label><input id="prioReason"></div><div class="full"><button class="btn btn-danger">Cadastrar prioridade</button></div></div></form></div>
+ `<div class="panel"><form id="priorityForm"><div class="form-grid"><div class="full"><label>Motorista cadastrado</label><select id="prioDriver" required><option value="">Selecione...</option>${available.map(d=>`<option value="${d.id}">${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`).join('')}</select><p class="small">Não encontrou o motorista? Cadastre primeiro o veículo em Carros no Pátio.</p></div><div><label>Placa</label><input id="prioPlate" class="readonly-field" readonly></div><div><label>Cavalo</label><input id="prioHorse" class="readonly-field" readonly></div><div><label>Tipologia</label><input id="prioTyp" class="readonly-field" readonly></div><div><label>Quantidade prevista calculada</label><input id="prioExpectedVolumes" type="number" min="0" readonly class="readonly-field"></div><div><label>Motivo (opcional)</label><input id="prioReason"></div><div class="full"><button class="btn btn-danger">Cadastrar prioridade</button></div></div></form></div>
  <div class="panel"><div class="table-wrap"><table><thead><tr><th>Motorista</th><th>Placa</th><th>Tipologia</th><th>Motivo</th><th>Status</th><th>Cadastro</th><th>Ação</th></tr></thead><tbody>${state.priorities.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(p=>`<tr><td>${esc(p.driverName)}</td><td>${esc(p.plate)}</td><td>${esc(p.typology)}</td><td>${esc(p.reason||'—')}</td><td><span class="badge ${p.status==='Aguardando'?'badge-red':'badge-green'}">${p.status}</span></td><td>${brDate(p.createdAt)}</td><td>${p.status==='Aguardando'?`<button class="btn btn-soft cancel-priority" data-id="${p.id}">Cancelar</button>`:'—'}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 function historyRows(){
- return state.history.map(h=>`<tr><td>${brDate(h.finishedAt)}</td><td>${esc(h.driverName)}</td><td>${esc(h.plate)}</td><td>${esc(h.typology)}</td><td>${esc(h.operation)}</td><td>Doca ${esc(h.dock)}</td><td>${Number(h.hc||1)}</td><td>${h.expectedVolumes}</td><td>${h.receivedVolumes}</td><td>${h.receivedVolumes-h.expectedVolumes}</td><td>${h.durationMin} min</td><td><button class="btn btn-soft photo-btn" data-id="${h.id}" data-kind="start">Inicial</button> <button class="btn btn-soft photo-btn" data-id="${h.id}" data-kind="end">Final</button></td></tr>`).join('');
+ return state.history.map(h=>`<tr><td>${brDate(h.finishedAt)}</td><td>${esc(h.driverName)}</td><td>${esc(h.plate)}</td><td>${esc(h.typology)}</td><td>${esc(h.operation)}</td><td>Doca ${esc(h.dock)}</td><td>${Number(h.hc||1)}</td><td>${h.expectedVolumes}</td><td>${h.receivedVolumes}</td><td>${h.receivedVolumes-h.expectedVolumes}</td><td>${h.durationMin} min</td><td><button class="btn btn-soft photo-btn" data-id="${h.id}" data-kind="start">Inicial</button> <button class="btn btn-soft share-history-photo" data-id="${h.id}" data-kind="start">↗ Início</button> <button class="btn btn-soft photo-btn" data-id="${h.id}" data-kind="end">Final</button> <button class="btn btn-soft share-history-photo" data-id="${h.id}" data-kind="end">↗ Final</button></td></tr>`).join('');
 }
 function renderHistory(){
- return pageHead('Lista / Histórico','Registros finalizados. A Torre também pode visualizar as fotos.',`${can('admin','leader')?'<button id="exportBtn" class="btn btn-success">Baixar Excel</button> <button id="closeTurnBtn" class="btn btn-danger">Encerrar turno</button>':''}`)+
+ return pageHead('Lista / Histórico','Registros finalizados. A Torre também pode visualizar as fotos.',`${session.role==='tower'?'<button id="exportBtn" class="btn btn-success">Baixar Excel</button>':''}`)+
  `<div class="panel"><div class="inline"><div><label>Pesquisar</label><input id="historySearch" placeholder="Motorista, placa, tipologia ou operação"></div><div><label>Operação</label><select id="historyOperation"><option value="">Todas</option><option>TZX</option><option>Last Mile</option></select></div></div></div>
  <div class="panel"><div class="table-wrap"><table id="historyTable"><thead><tr><th>Finalizado</th><th>Motorista</th><th>Placa</th><th>Tipologia</th><th>Operação</th><th>Doca</th><th>HC</th><th>Previsto</th><th>Recebido</th><th>Diferença</th><th>Tempo</th><th>Fotos</th></tr></thead><tbody>${historyRows()}</tbody></table></div></div>`;
 }
@@ -876,6 +977,8 @@ function renderAdmin(){
 function renderLogs(){return pageHead('Histórico do Sistema','Entradas, lançamentos, alterações e finalizações.')+`<div class="panel"><div class="table-wrap"><table><thead><tr><th>Data/hora</th><th>Usuário</th><th>Perfil</th><th>Operação</th><th>Ação</th><th>Detalhe</th></tr></thead><tbody>${state.logs.map(l=>`<tr><td>${brDate(l.at)}</td><td>${esc(l.user)}</td><td>${roleName(l.role)}</td><td>${esc(l.operation)}</td><td>${esc(l.action)}</td><td>${esc(l.detail)}</td></tr>`).join('')}</tbody></table></div></div>`}
 
 function bindPage(){
+  $('#patioForm')?.addEventListener('submit',addPatioVehicle);$$('.remove-patio').forEach(b=>b.onclick=()=>{state.patio=state.patio.filter(x=>x.id!==b.dataset.id);save();render();});
+  $('#patioDriverSelect')?.addEventListener('change',e=>{const d=state.drivers.find(x=>x.id===e.target.value);if(!d)return;$('#patioName').value=d.name||'';$('#patioPlate').value=d.plate||'';$('#patioHorse').value=d.horse||'S/N';$('#patioTyp').value=d.typology||$('#patioTyp').value;});
   setTimeout(()=>{const awb=$('#awbInput, input[name=awb], input[data-awb]');if(awb){awb.setAttribute('inputmode','none');awb.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();awb.form?.requestSubmit?.();setTimeout(()=>{awb.value='';awb.focus()},80)}})}},0);
   const startForm=$('#startForm');
   startForm?.addEventListener('submit',startReceiving);
@@ -887,8 +990,8 @@ function bindPage(){
   $('#openStartCameraBtn')?.addEventListener('click',()=>{lockReceivingOperation('câmera');openCamera('start')});
   $('#driverSelect')?.addEventListener('change',e=>{const d=state.drivers.find(x=>x.id===e.target.value);$('#driverPlateView').value=d?.plate||'';$('#driverHorseView').value=d?.horse||'';$('#driverTypView').value=d?.typology||''});
   $$('.finalize-btn').forEach(b=>b.onclick=()=>openFinish(b.dataset.id));
-  $$('.view-start-photo').forEach(b=>b.onclick=()=>showActivePhoto(b.dataset.id));
-  $('#planForm')?.addEventListener('submit',addPlan);
+  $$('.view-start-photo').forEach(b=>b.onclick=()=>showActivePhoto(b.dataset.id));$$('.share-start-photo').forEach(b=>b.onclick=()=>shareActiveStart(b.dataset.id));
+  $('#planForm')?.addEventListener('submit',addPlan);$('#closeDayBtn')?.addEventListener('click',closeOperationalDay);
 
   $$('.delete-plan').forEach(b=>b.onclick=async()=>{
     const id=b.dataset.id;
@@ -905,7 +1008,7 @@ function bindPage(){
   });
 
   $('#priorityForm')?.addEventListener('submit',addPriority);$('#prioDriver')?.addEventListener('change',refreshPriorityDriverFields);refreshPriorityDriverFields();$$('.cancel-priority').forEach(b=>b.onclick=()=>{const p=state.priorities.find(x=>x.id===b.dataset.id);if(!p)return;p.status='Cancelada';p.cancelledAt=nowISO();p.updatedAt=nowISO();log('Cancelou prioridade',p.plate,false);save();render()});
-  $$('.photo-btn').forEach(b=>b.onclick=()=>showHistoryPhoto(b.dataset.id,b.dataset.kind));
+  $$('.photo-btn').forEach(b=>b.onclick=()=>showHistoryPhoto(b.dataset.id,b.dataset.kind));$$('.share-history-photo').forEach(b=>b.onclick=()=>shareHistoryPhoto(b.dataset.id,b.dataset.kind));
   $('#historySearch')?.addEventListener('input',filterHistory);$('#historyOperation')?.addEventListener('change',filterHistory);
   $('#exportBtn')?.addEventListener('click',exportExcel);$('#closeTurnBtn')?.addEventListener('click',closeTurn);
   $('#driverForm')?.addEventListener('submit',saveDriver);$$('.edit-driver').forEach(b=>b.onclick=()=>editDriver(b.dataset.id));$$('.delete-driver').forEach(b=>b.onclick=()=>deleteDriver(b.dataset.id));$('#deleteAllDriversBtn')?.addEventListener('click',deleteAllDrivers);$('#importDriversBtn')?.addEventListener('click',()=>$('#driversExcelInput')?.click());$('#driversExcelInput')?.addEventListener('change',importDriversExcel);
@@ -927,16 +1030,23 @@ async function startReceiving(e){
  try{
   const driver=state.drivers.find(d=>d.id===$('#driverSelect').value),dock=$('#dockSelect').value,photo=$('#startPhotoData').value,hc=Math.max(1,Number($('#hcCount')?.value||1));
   if(!driver||!dock||!photo)return toast('Preencha motorista, doca e registre a foto inicial.','error');
+  const correctedPlate=normalizeDriverPlate($('#driverPlateView')?.value||driver.plate);
+  const correctedHorse=normalizeDriverPlate($('#driverHorseView')?.value||driver.horse)||'S/N';
+  const correctedTyp=String($('#driverTypView')?.value||driver.typology).trim();
+  if(correctedPlate && state.drivers.some(d=>d.id!==driver.id&&normalizeDriverPlate(d.plate)===correctedPlate))return toast('A placa corrigida já pertence a outro motorista.','error');
+  Object.assign(driver,{plate:correctedPlate||driver.plate,horse:correctedHorse,typology:correctedTyp||driver.typology,updatedAt:nowISO()});
+  state.patio.forEach(p=>{if(p.driverId===driver.id){p.plate=driver.plate;p.horse=driver.horse;p.typology=driver.typology;p.updatedAt=nowISO();}});
   if(state.active.some(a=>a.dock===dock)||state.docks.find(d=>d.number===dock)?.status!=='Livre')return toast('Esta doca está ocupada ou bloqueada.','error');
   startingReceiving=true;if(submit){submit.disabled=true;submit.textContent='Iniciando...';}
   const balance=planBalance(driver.typology),target=state.typologies.find(t=>t.name===driver.typology)?.targetMin||30;
   const pr=state.priorities.find(p=>p.status==='Aguardando'&&(p.driverId===driver.id||p.plate.toUpperCase()===driver.plate.toUpperCase()));if(pr){pr.status='Atendida';pr.attendedAt=nowISO();pr.updatedAt=nowISO();}
   const activeId=uid();
   state.active.push({id:activeId,driverId:driver.id,driverName:driver.name,plate:driver.plate,horse:driver.horse,typology:driver.typology,dock,operation:session.operation,expectedVolumes:balance.expected,targetMin:target,startedAt:nowISO(),startPhoto:photo,priority:!!pr,priorityId:pr?.id||null,priorityReason:pr?.reason||'',updatedAt:nowISO(),operator:session.name,hc,alert50:false,alert80:false,alert100:false,lastOvertimeAlert:0});
-  const dockRow=state.docks.find(d=>d.number===dock);if(dockRow)dockRow.status='Ocupada';
+  state.patio=state.patio.filter(p=>p.driverId!==driver.id&&normalizeDriverPlate(p.plate)!==normalizeDriverPlate(driver.plate));
+   const dockRow=state.docks.find(d=>d.number===dock);if(dockRow)dockRow.status='Ocupada';
   log('Iniciou descarregamento',`${driver.name} • Doca ${dock} • HC ${hc}`,false);
   save(false);
-  unlockReceivingOperation({applyPending:true,refresh:true});
+  pendingIncomingState=null;unlockReceivingOperation({applyPending:false,refresh:false});refreshUI(false);
   if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),300)}
 
 toast('Descarregamento iniciado e salvo.','ok');
@@ -1232,12 +1342,33 @@ Data: ${new Date().toLocaleString('pt-BR')}`;
 }
 }
 
+
+function logoutNow(reason='Saiu do sistema'){
+ try{stopCloudSession()}catch(e){}
+ clearTimeout(cloudPullTimer);
+ clearTimeout(syncTimer);
+ syncQueued=false;
+ syncInFlight=false;
+ session=null;
+ try{sessionStorage.removeItem(SESSION)}catch(e){}
+ try{localStorage.removeItem(SESSION_PERSIST)}catch(e){}
+ currentPage='dashboard';
+ closeModal();
+ const app=$('#app'),login=$('#loginScreen');
+ if(app)app.classList.add('hidden');
+ if(login)login.classList.remove('hidden');
+ const u=$('#loginUser'),p=$('#loginPass');
+ if(u)u.value='';
+ if(p)p.value='';
+ setTimeout(()=>u?.focus(),50);
+}
+
 function openAccessSetup(user){
   const needsOperation=user.role==='receiving';
   $('#modalBox').innerHTML=`<div class="modal-head"><h3>Identificação da operação</h3></div>
   <p class="small">${needsOperation?'Informe quem está operando o equipamento e de qual operação os veículos serão recebidos.':'Informe o nome de quem está operando o sistema.'}</p>
   <form id="accessSetupForm"><div class="form-grid">
-    <div class="full"><label>Nome do operador</label><input id="setupOperator" value="${esc(user.name||'')}" required placeholder="Digite o nome do operador"></div>
+    <div class="full"><label>Nome do operador</label><input id="setupOperator" value="" autocomplete="off" required placeholder="Digite o nome do operador"></div>
     ${needsOperation?`<div class="full"><label>Operação</label><select id="setupOperation" required><option value="">Selecione...</option><option>TZX</option><option>Last Mile</option></select></div>`:''}
     <div class="full"><button class="btn btn-primary" type="submit">Entrar no CRC</button></div>
   </div></form>`;
@@ -1248,7 +1379,7 @@ function openAccessSetup(user){
     if(!operator||(needsOperation&&!operation))return toast(needsOperation?'Informe o operador e selecione a operação.':'Informe o nome do operador.','error');
     session={id:user.id,name:operator,accountName:user.name,role:user.role,operation};
     sessionStorage.setItem(SESSION,JSON.stringify(session));localStorage.setItem(SESSION_PERSIST,JSON.stringify(session));
-    currentPage=user.role==='receiving'?'receiving':'dashboard';closeModal();$('#loginScreen').classList.add('hidden');$('#app').classList.remove('hidden');resetInactivity();
+    currentPage=user.role==='receiving'?'receiving':user.role==='patio'?'patio':'dashboard';closeModal();$('#loginScreen').classList.add('hidden');$('#app').classList.remove('hidden');
     requestAnimationFrame(async()=>{render();await startCloudSession({pull:true});log('Entrou no sistema',needsOperation?session.operation:'Acesso geral');});
   };
 }
@@ -1314,22 +1445,78 @@ async function openCamera(target){
 }
 
 function checkTimeAlerts(){const t=Date.now();let changed=false;state.active.forEach(a=>{const pct=((t-new Date(a.startedAt))/60000)/Math.max(1,a.targetMin);if(pct>=.5&&!a.alert50){toast(`Doca ${a.dock} • ${a.driverName} • 50% do tempo utilizado.`,'attention',7000);a.alert50=true;changed=true}if(pct>=.8&&!a.alert80){toast(`Doca ${a.dock} • ${a.driverName} • faltam poucos minutos para o limite.`,'warning',8000);a.alert80=true;changed=true}if(pct>=1&&!a.alert100){toast(`Doca ${a.dock} • ${a.driverName} • tempo limite atingido.`,'overtime',9000);a.alert100=true;a.lastOvertimeAlert=t;changed=true}else if(pct>=1&&(!a.lastOvertimeAlert||t-a.lastOvertimeAlert>=300000)){toast(`Doca ${a.dock} • ${a.driverName} • descarregamento acima do tempo.`,'overtime',9000);a.lastOvertimeAlert=t;changed=true}});if(changed)save(false)}
-let inactivityTimer=null,warningTimer=null;
-function resetInactivity(){clearTimeout(inactivityTimer);clearTimeout(warningTimer);if(session){warningTimer=setTimeout(()=>toast('A sessão será encerrada em 30 segundos por inatividade.','warning',10000),570000);inactivityTimer=setTimeout(()=>logoutNow('Sessão encerrada após 10 minutos sem atividade.'),600000)}}
-function logoutNow(reason=''){try{if(session)log(reason||'Saiu do sistema');persistLocalSnapshot()}catch(e){}stopCloudSession();sessionStorage.removeItem(SESSION);localStorage.removeItem(SESSION_PERSIST);session=null;clearTimeout(inactivityTimer);clearTimeout(warningTimer);showLogin();if(reason)toast(reason,'error',7000)}
-['click','keydown','mousemove','touchstart','scroll'].forEach(ev=>document.addEventListener(ev,resetInactivity,{passive:true}));
+function resetInactivity(){ /* logout automático desativado */ } // V10.8: sem logout automático por inatividade.
 
 function closeModal(){if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null}$('#modal').classList.add('hidden');$('#modalBox').innerHTML=''}
 function showActivePhoto(id){const a=state.active.find(x=>x.id===id);showPhoto(a?.startPhoto,'Foto inicial')}
 function showHistoryPhoto(id,kind){const h=state.history.find(x=>x.id===id);showPhoto(kind==='start'?h?.startPhoto:h?.endPhoto,kind==='start'?'Foto inicial':'Foto final')}
 function showPhoto(src,title){if(!src)return toast('Foto não encontrada.','error');$('#modalBox').innerHTML=`<div class="modal-head"><h3>${title}</h3><button class="close" onclick="closeModal()">✕</button></div><img class="photo-preview" src="${src}">`;$('#modal').classList.remove('hidden')}
-function addPlan(e){e.preventDefault();const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(true);e.currentTarget.reset();$('#planDate').value=new Date().toISOString().slice(0,10);render();toast('Programação cadastrada.','ok')}
 
-function addPriority(e){e.preventDefault();const driver=state.drivers.find(d=>d.id===$('#prioDriver').value&&d.status==='Ativo');if(!driver)return toast('Motorista não cadastrado ou inativo. Solicite ao Líder o cadastro.','error');if(state.priorities.some(p=>p.status==='Aguardando'&&p.driverId===driver.id))return toast('Este motorista já está na fila de prioridade.','error');const createdAt=nowISO(),p={id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()};state.priorities.push(p);log('Cadastrou prioridade',p.plate,false);save();toast(`${p.driverName} • ${p.plate} • ${p.typology}`,'priority',8000);render()}
+function saveQuickDriver(e){
+ e.preventDefault();
+ const name=normalizeDriverName($('#quickDriverName').value),plate=normalizeDriverPlate($('#quickDriverPlate').value),horse=normalizeDriverPlate($('#quickDriverHorse').value)||'S/N',typology=$('#quickDriverTyp').value;
+ if(!name||!plate||!typology)return toast('Preencha nome, placa e tipologia.','error');
+ if(state.drivers.some(d=>normalizeDriverPlate(d.plate)===plate))return toast('Esta placa já está cadastrada.','error');
+ const at=nowISO();state.drivers.push({id:uid(),name,plate,horse,typology,status:'Ativo',createdAt:at,updatedAt:at});
+ log('Cadastrou motorista no Recebimento',`${name} • ${plate}`,false);save(true);render();toast('Motorista cadastrado.','ok');
+}
+async function shareActiveStart(id){
+ const a=state.active.find(x=>x.id===id);if(!a?.startPhoto)return toast('Foto inicial não encontrada.','error');
+ const txt=`🚚 DESCARGA INICIADA\n\nMotorista: ${a.driverName}\nPlaca: ${a.plate}\nCavalo: ${a.horse}\nTipologia: ${a.typology}\nDoca: ${a.dock}\nInício original: ${brDate(a.startedAt)}\nOperador: ${a.operator||session.name}`;
+ await compartilharFotoOperacao(a.startPhoto,txt,`Inicio_${a.plate}.jpg`);
+}
+async function shareHistoryPhoto(id,kind){
+ const h=state.history.find(x=>x.id===id);if(!h)return toast('Registro não encontrado.','error');
+ const isStart=kind==='start',photo=isStart?h.startPhoto:h.endPhoto;if(!photo)return toast('Foto não encontrada.','error');
+ const txt=`${isStart?'🚚 DESCARGA INICIADA':'✅ DESCARGA FINALIZADA'}\n\nMotorista: ${h.driverName}\nPlaca: ${h.plate}\nCavalo: ${h.horse}\nTipologia: ${h.typology}\nDoca: ${h.dock}\n${isStart?'Início':'Fim'} original: ${brDate(isStart?h.startedAt:h.finishedAt)}\nOperador: ${h.operator||session.name}`;
+ await compartilharFotoOperacao(photo,txt,`${isStart?'Inicio':'Final'}_${h.plate}.jpg`);
+}
+function auditFileName(){return `CRC_Auditoria_Fotos_${localDateKey()}.html`}
+function downloadAuditPhotos(){
+ const recs=state.history.slice();
+ const html=`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>CRC Auditoria ${localDateKey()}</title><style>body{font-family:Arial;margin:24px}article{border:1px solid #ccc;border-radius:12px;padding:16px;margin:16px 0}img{max-width:760px;max-height:620px;margin:8px 0;border-radius:8px;display:block}code{font-weight:bold;font-size:15px}.photo{padding-top:12px}</style><h1>CRC — Auditoria ${localDateKey()}</h1><p>${recs.length} recebimentos finalizados.</p>${recs.map(h=>`<article><h2>${esc(h.driverName)} — ${esc(h.plate)}</h2><p>${esc(h.typology)} • Doca ${esc(h.dock)} • ${brDate(h.finishedAt)}</p>${h.startPhoto?`<div class="photo" id="${esc(h.photoStartCode)}"><code>${esc(h.photoStartCode)}</code><br>Foto inicial<img src="${h.startPhoto}"></div>`:''}${h.endPhoto?`<div class="photo" id="${esc(h.photoEndCode)}"><code>${esc(h.photoEndCode)}</code><br>Foto final<img src="${h.endPhoto}"></div>`:''}</article>`).join('')}</html>`;
+ const blob=new Blob([html],{type:'text/html;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=auditFileName();a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+}
+async function closeOperationalDay(){
+ if(!confirm('Finalizar este ciclo operacional? O CRC vai baixar a produção e a auditoria das fotos e depois limpar TODA a operação, mantendo motoristas, docas, tipologias e os 3 usuários.'))return;
+ if(!confirm('Confirma? Previsões, pátio, prioridades, veículos em descarga, recebidos, histórico e logs serão zerados para iniciar uma nova programação.'))return;
+ exportExcel();downloadAuditPhotos();
+ await new Promise(r=>setTimeout(r,800));
+ stopCloudSession();clearTimeout(syncTimer);syncQueued=false;syncInFlight=false;
+ const resetEpoch=Date.now(),stamp=nowISO();
+ const keep={users:state.users.filter(u=>['tower','receiving','patio'].includes(u.role)),drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||stamp,updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch,lastEvent:null}};
+ state={version:'11.0',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
+ enforceDefaultAccessAndDedupe();localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();lastAppliedCloudFingerprint=cloudFingerprint(state);
+ try{
+   initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
+   const payload=JSON.parse(JSON.stringify(state));payload.settings={...(payload.settings||{}),supabaseUrl:SUPABASE_URL,supabaseKey:'',supabaseEnabled:true};
+   const {error}=await supabaseClient.from(SUPABASE_TABLE).upsert({id:SUPABASE_ROW_ID,dados:payload,atualizado_em:stamp},{onConflict:'id'});
+   if(error)throw error;
+   state.settings.lastSync=nowISO();persistLocalSnapshot();render();initRealtime();
+   toast('Ciclo finalizado: arquivos baixados e operação zerada no CRC e no Supabase.','ok',9000);
+ }catch(e){
+   render();initRealtime();toast('A operação foi zerada neste aparelho, mas o Supabase não confirmou a limpeza: '+e.message,'error',11000);
+ }
+}
+
+let addingPlan=false;
+function addPlan(e){e.preventDefault();if(addingPlan)return;const btn=e.currentTarget?.querySelector('button[type="submit"]');const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');addingPlan=true;if(btn)btn.disabled=true;try{const duplicate=state.plan.some(x=>x.date===date&&x.typology===typology&&Number(x.vehicles)===vehicles&&Number(x.volumes)===volumes&&Number(x.weight||0)===weight&&(Date.now()-new Date(x.createdAt||0).getTime())<5000);if(duplicate)return toast('Este lançamento já foi registrado.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(true);e.currentTarget.reset();$('#planDate').value=new Date().toISOString().slice(0,10);render();toast('Programação cadastrada.','ok');if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),150)}}finally{addingPlan=false;if(btn&&document.body.contains(btn))btn.disabled=false}}
+
+function addPriority(e){e.preventDefault();const driver=state.drivers.find(d=>d.id===$('#prioDriver').value&&d.status==='Ativo');if(!driver)return toast('Motorista não cadastrado ou inativo. Cadastre o motorista no Recebimento ou no Pátio.','error');if(state.priorities.some(p=>p.status==='Aguardando'&&p.driverId===driver.id))return toast('Este motorista já está na fila de prioridade.','error');const createdAt=nowISO(),p={id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()};state.priorities.push(p);log('Cadastrou prioridade',p.plate,false);save();toast(`${p.driverName} • ${p.plate} • ${p.typology}`,'priority',8000);render()}
 function filterHistory(){const q=$('#historySearch').value.toLowerCase(),op=$('#historyOperation').value;$$('#historyTable tbody tr').forEach(tr=>tr.style.display=(!q||tr.innerText.toLowerCase().includes(q))&&(!op||tr.innerText.includes(op))?'':'none')}
 function exportExcel(){
+ const audit=auditFileName();
  const rows=state.history.map(h=>({Data:brDate(h.finishedAt),Motorista:h.driverName,Placa:h.plate,Cavalo:h.horse,Tipologia:h.typology,Operação:h.operation,Doca:h.dock,HC:Number(h.hc||1),'Volumes previstos':h.expectedVolumes,'Volumes recebidos':h.receivedVolumes,Diferença:h.receivedVolumes-h.expectedVolumes,'Início':brDate(h.startedAt),'Fim':brDate(h.finishedAt),'Tempo (min)':h.durationMin,'Foto inicial':h.photoStartCode,'Foto final':h.photoEndCode,Observação:h.observation}));
- const ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Recebimentos');XLSX.writeFile(wb,`CRC_Recebimentos_${new Date().toISOString().slice(0,10)}.xlsx`);log('Exportou Excel',`${rows.length} registros`)
+ const ws=XLSX.utils.json_to_sheet(rows);
+ const headers=rows.length?Object.keys(rows[0]):[];
+ const ci=headers.indexOf('Foto inicial'),cf=headers.indexOf('Foto final');
+ rows.forEach((h,i)=>{
+   const row=i+2;
+   if(ci>=0&&h['Foto inicial']){const c=ws[XLSX.utils.encode_cell({r:row-1,c:ci})];if(c)c.l={Target:`${audit}#${h['Foto inicial']}`,Tooltip:'Abrir foto inicial na auditoria'};}
+   if(cf>=0&&h['Foto final']){const c=ws[XLSX.utils.encode_cell({r:row-1,c:cf})];if(c)c.l={Target:`${audit}#${h['Foto final']}`,Tooltip:'Abrir foto final na auditoria'};}
+ });
+ const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Recebimentos');
+ XLSX.writeFile(wb,`CRC_Producao_${localDateKey()}.xlsx`);
 }
 async function closeTurn(){
  if(!state.history.length)return toast('Não há registros finalizados para arquivar neste turno.','error');
@@ -1392,11 +1579,54 @@ function mergeEntityArrays(local=[],remote=[],fallbackLocal=0,fallbackRemote=0){
  return [...map.values()];
 }
 function mergeStates(local,remote){
- local=normalizeStateShape(JSON.parse(JSON.stringify(local||{})));remote=normalizeStateShape(JSON.parse(JSON.stringify(remote||{})));
- const lt=stateStamp(local),rt=stateStamp(remote),base=rt>lt?remote:local;
- const merged={...base,settings:{...(remote.settings||{}),...(local.settings||{})},meta:{...(base.meta||{})}};
- ['users','plan','drivers','docks','priorities','history','turns','logs'].forEach(k=>merged[k]=mergeEntityArrays(local[k],remote[k],lt,rt));
- merged.typologies=mergeEntityArrays((local.typologies||[]).map(x=>({id:x.id||x.name,...x})),(remote.typologies||[]).map(x=>({id:x.id||x.name,...x})),lt,rt).map(({id,...x})=>x);
+ local=normalizeStateShape(JSON.parse(JSON.stringify(local||{})));
+ remote=normalizeStateShape(JSON.parse(JSON.stringify(remote||{})));
+
+ const lt=stateStamp(local),rt=stateStamp(remote);
+ const localReset=Number(local.meta?.resetEpoch||0),remoteReset=Number(remote.meta?.resetEpoch||0);
+ if(remoteReset>localReset){
+   const clean=normalizeStateShape(JSON.parse(JSON.stringify(remote)));
+   clean.settings={...(remote.settings||{}),...(local.settings||{})};
+   return keepOnlyCurrentOperationalDay(clean);
+ }
+ if(localReset>remoteReset){
+   const clean=normalizeStateShape(JSON.parse(JSON.stringify(local)));
+   clean.settings={...(remote.settings||{}),...(local.settings||{})};
+   return keepOnlyCurrentOperationalDay(clean);
+ }
+ const base=rt>lt?remote:local;
+
+ const merged={
+  ...base,
+  settings:{...(remote.settings||{}),...(local.settings||{})},
+  meta:{...(base.meta||{})}
+ };
+
+ // Entidades que podem ser mescladas normalmente
+ ['users','drivers','docks','patio','priorities','turns','logs']
+ .forEach(k=>{
+  merged[k]=mergeEntityArrays(local[k],remote[k],lt,rt);
+ });
+
+ // Programação da Torre
+ // Nunca faz merge para evitar retorno de registros antigos.
+ merged.plan = JSON.parse(JSON.stringify(
+  rt>lt ? (remote.plan||[]) : (local.plan||[])
+ ));
+
+ // Histórico
+ // Nunca faz merge para evitar reaparecimento de recebimentos antigos.
+ merged.history = JSON.parse(JSON.stringify(
+  rt>lt ? (remote.history||[]) : (local.history||[])
+ ));
+
+ // Tipologias permanecem com merge
+ merged.typologies=mergeEntityArrays(
+  (local.typologies||[]).map(x=>({id:x.id||x.name,...x})),
+  (remote.typologies||[]).map(x=>({id:x.id||x.name,...x})),
+  lt,
+  rt
+ ).map(({id,...x})=>x);
  merged.active=mergeEntityArrays(local.active,remote.active,lt,rt);
  const archivedIds=new Set(merged.turns.flatMap(t=>(t.records||[]).map(r=>r.id)));
  const completedIds=new Set([...merged.history.map(h=>h.id),...archivedIds]);
@@ -1404,8 +1634,8 @@ function mergeStates(local,remote){
  merged.history=merged.history.filter(h=>!archivedIds.has(h.id));
  const occupied=new Set(merged.active.map(a=>a.dock));
  merged.docks=uniqueDocks(merged.docks).map(d=>({...d,status:occupied.has(d.number)?'Ocupada':(d.status==='Ocupada'?'Livre':d.status)}));
- merged.version='10.6';merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
- return normalizeStateShape(merged);
+ merged.version='10.8';merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
+ return keepOnlyCurrentOperationalDay(normalizeStateShape(merged));
 }
 function initSupabase(){
  try{
@@ -1426,60 +1656,218 @@ async function startCloudSession({pull=true}={}){
  if(pull)return await pullCloud(true);
  return true;
 }
-function scheduleCloudPull(delay=80){if(!cloudSessionAllowed())return;clearTimeout(cloudPullTimer);cloudPullTimer=setTimeout(()=>{if(!cloudSessionAllowed())return;if(syncInFlight){scheduleCloudPull(180);return}pullCloud(true)},delay)}
+function scheduleCloudPull(delay=250){
+
+ if(!cloudSessionAllowed())return;
+
+ clearTimeout(cloudPullTimer);
+
+ cloudPullTimer=setTimeout(()=>{
+
+  if(!cloudSessionAllowed())return;
+
+  if(syncInFlight){
+
+   scheduleCloudPull(500);
+
+   return;
+
+  }
+
+  pullCloud(false);
+
+ },delay);
+
+}
+
 function initRealtime(){
  if(!cloudSessionAllowed())return;
- initSupabase();if(!supabaseClient)return;
- try{if(supabaseChannel)supabaseClient.removeChannel(supabaseChannel)}catch(e){}
- supabaseChannel=supabaseClient.channel('crc-live-v104',{config:{broadcast:{self:false}}})
-  .on('postgres_changes',{event:'*',schema:'public',table:SUPABASE_TABLE,filter:`id=eq.${SUPABASE_ROW_ID}`},()=>scheduleCloudPull(40))
-  .on('broadcast',{event:'crc-change'},()=>scheduleCloudPull(10))
-  .subscribe(status=>{if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')setTimeout(initRealtime,1600)});
+ initSupabase();if(!supabaseClient||supabaseChannel)return;
+ supabaseChannel=supabaseClient
+  .channel('crc-live-v109',{config:{broadcast:{self:false}}})
+  .on('postgres_changes',{event:'*',schema:'public',table:SUPABASE_TABLE,filter:`id=eq.${SUPABASE_ROW_ID}`},()=>scheduleCloudPull(90))
+  .on('broadcast',{event:'crc-change'},()=>scheduleCloudPull(45))
+  .subscribe(status=>{
+    if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
+      try{supabaseClient.removeChannel(supabaseChannel)}catch(e){}
+      supabaseChannel=null;
+      if(cloudSessionAllowed())setTimeout(initRealtime,2500);
+    }
+  });
 }
 async function pullCloud(force=false){
  if(!cloudSessionAllowed())return false;
- initSupabase();if(!supabaseClient)return false;
+ initSupabase();
+ if(!supabaseClient)return false;
+
  let lastError=null;
+
  for(let attempt=0;attempt<3;attempt++){
+
   try{
-   const {data,error}=await supabaseClient.from(SUPABASE_TABLE).select('dados,atualizado_em').eq('id',SUPABASE_ROW_ID).maybeSingle();
+
+   const {data,error}=await supabaseClient
+    .from(SUPABASE_TABLE)
+    .select('dados,atualizado_em')
+    .eq('id',SUPABASE_ROW_ID)
+    .maybeSingle();
+
    if(error)throw error;
+
    if(data?.dados){
+
     const incoming=normalizeStateShape(JSON.parse(JSON.stringify(data.dados)));
-    incoming.settings={...(incoming.settings||{}),supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
+
+    incoming.settings={
+     ...(incoming.settings||{}),
+     supabaseUrl:SUPABASE_URL,
+     supabaseKey:SUPABASE_KEY,
+     supabaseEnabled:true
+    };
+
     enforceIncomingDedupe(incoming);
-    applyIncomingState(incoming,force);
-   }else{await syncCloud(true);}
+
+    // Não permitir que uma versão antiga sobrescreva a atual
+    const localStamp=state.meta?.updatedAt||'';
+    const remoteStamp=incoming.meta?.updatedAt||'';
+
+    if(
+      force ||
+      !localStamp ||
+      (remoteStamp && remoteStamp>=localStamp)
+    ){
+      applyIncomingState(incoming,false);
+    }
+
+   }else{
+
+    await syncCloud(true);
+
+   }
+
    return true;
-  }catch(e){lastError=e;console.warn(`CRC: tentativa ${attempt+1} de carregar Supabase falhou.`,e);if(attempt<2)await new Promise(r=>setTimeout(r,350*(attempt+1)));}
+
+  }catch(e){
+
+   lastError=e;
+
+   console.warn(`CRC: tentativa ${attempt+1} de carregar Supabase falhou.`,e);
+
+   if(attempt<2)
+    await new Promise(r=>setTimeout(r,350*(attempt+1)));
+
+  }
+
  }
+
  console.error('CRC: falha ao carregar Supabase.',lastError);
- if(document.visibilityState==='visible')toast('Conexão temporariamente instável. O CRC continuará tentando sincronizar.','attention',5500);
+
+ if(document.visibilityState==='visible')
+  toast('Conexão temporariamente instável. O CRC continuará tentando sincronizar.','attention',5500);
+
  return false;
 }
+
 async function syncCloud(silent=false){
- if(!cloudSessionAllowed()){syncQueued=true;return false}
- initSupabase();if(!supabaseClient){if(!silent)toast('Supabase indisponível.','error');return false}
- if(syncInFlight){syncQueued=true;return true}
- syncInFlight=true;
- try{
-  // A ação local é a fonte oficial: envia o estado inteiro e sobrescreve o salvo.
-  enforceDefaultAccessAndDedupe();
-  const payload=JSON.parse(JSON.stringify(state));
-  const sentStamp=payload.meta?.updatedAt||nowISO();
-  payload.version='10.5';
-  payload.settings={...(payload.settings||{}),supabaseUrl:SUPABASE_URL,supabaseKey:'',supabaseEnabled:true};
-  const {error}=await supabaseClient.from(SUPABASE_TABLE).upsert({id:SUPABASE_ROW_ID,dados:payload,atualizado_em:sentStamp},{onConflict:'id'});
-  if(error)throw error;
-  state.settings.lastSync=nowISO();lastAppliedCloudFingerprint=cloudFingerprint(payload);persistLocalSnapshot();
-  try{await supabaseChannel?.send({type:'broadcast',event:'crc-change',payload:{at:sentStamp,event:state.meta?.lastEvent||null}})}catch(e){}
-  if((state.meta?.updatedAt||'')!==sentStamp)syncQueued=true;
-  if(!silent)toast('Sincronização concluída.','ok');
+
+ if(!cloudSessionAllowed()){
+  syncQueued=true;
+  return false;
+ }
+
+ initSupabase();
+
+ if(!supabaseClient){
+  if(!silent)toast('Supabase indisponível.','error');
+  return false;
+ }
+
+ if(syncInFlight){
+  syncQueued=true;
   return true;
- }catch(e){console.error('CRC: falha na sincronização.',e);if(!silent)toast('Falha na sincronização: '+e.message,'error');return false}
- finally{
+ }
+
+ syncInFlight=true;
+
+ try{
+
+  // A ação local é a fonte oficial
+  enforceDefaultAccessAndDedupe();
+
+  const payload=JSON.parse(JSON.stringify(state));
+
+  const sentStamp=payload.meta?.updatedAt||nowISO();
+
+  payload.version='11.0';
+
+  payload.settings={
+   ...(payload.settings||{}),
+   supabaseUrl:SUPABASE_URL,
+   supabaseKey:'',
+   supabaseEnabled:true
+  };
+
+  const {error}=await supabaseClient
+   .from(SUPABASE_TABLE)
+   .upsert(
+    {
+      id:SUPABASE_ROW_ID,
+      dados:payload,
+      atualizado_em:sentStamp
+    },
+    {
+      onConflict:'id'
+    }
+   );
+
+  if(error)throw error;
+
+  state.settings.lastSync=nowISO();
+
+  lastAppliedCloudFingerprint=cloudFingerprint(payload);
+
+  persistLocalSnapshot();
+
+  try{
+   await supabaseChannel?.send({
+    type:'broadcast',
+    event:'crc-change',
+    payload:{at:sentStamp,event:state.meta?.lastEvent||null}
+   });
+  }catch(e){}
+
+  if((state.meta?.updatedAt||'')!==sentStamp)
+   syncQueued=true;
+
+  if(!silent)
+   toast('Sincronização concluída.','ok');
+
+  return true;
+
+ }catch(e){
+
+  console.error('CRC: falha na sincronização.',e);
+
+  if(!silent)
+   toast('Falha na sincronização: '+e.message,'error');
+
+  return false;
+
+ }finally{
+
   syncInFlight=false;
-  if(syncQueued){syncQueued=false;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),150)}
+
+  if(syncQueued){
+
+   syncQueued=false;
+
+   clearTimeout(syncTimer);
+
+   // reduz chamadas repetidas ao Supabase
+   syncTimer=setTimeout(()=>syncCloud(true),900);
+
+  }
+
  }
 }
 function restoreInternalBackup(){
@@ -1495,7 +1883,7 @@ async function clearAll(){
  if(!confirm('ZERAR TUDO que foi lançado? Serão apagados previsões, prioridades, recebimentos, veículos ativos e histórico. Usuários, motoristas, docas, tipologias e configurações serão mantidos. Somente os dados operacionais serão apagados.'))return;
  if(!confirm('Confirma a limpeza total dos dados operacionais? Esta ação não pode ser desfeita.'))return;
  const keep={users:state.users,drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||nowISO(),updatedAt:nowISO(),revision:Number(state.meta?.revision||0)+1}};
- state={version:'10.4',...keep,plan:[],active:[],history:[],priorities:[],logs:[],turns:[]};
+ state={version:'11.0',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
  enforceDefaultAccessAndDedupe();
  localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();
  try{
@@ -1514,7 +1902,13 @@ function priorityReminder(){
  const t=Date.now();state.priorities.filter(p=>p.status==='Aguardando').forEach(p=>{if(!p.lastAlert||t-p.lastAlert>=300000){toast(`${p.driverName} • ${p.plate} • ${p.typology}${p.reason?' • '+p.reason:''}`,'priority',8000);p.lastAlert=t;persistLocalSnapshot()}});
 }
 $('#loginForm').onsubmit=e=>{e.preventDefault();const u=state.users.find(x=>x.username.toLowerCase()===$('#loginUser').value.trim().toLowerCase()&&x.password===$('#loginPass').value&&x.active);if(!u)return toast('Usuário, senha ou status inválido.','error');openAccessSetup(u)}
-$('#logoutBtn').onclick=()=>logoutNow('Saiu do sistema')
+
+$('#manualRefreshSide').onclick=async()=>{
+ const b=$('#manualRefreshSide');if(b){b.disabled=true;b.textContent='↻'}
+ const ok=await pullCloud(true);
+ if(b){b.disabled=false;b.textContent='↻'}
+ toast(ok?'Sistema atualizado.':'Não foi possível atualizar agora.',ok?'ok':'error',4500);
+};
 const mobileBackdrop=document.createElement('div');mobileBackdrop.className='mobile-menu-backdrop';document.body.appendChild(mobileBackdrop);
 function setMobileMenu(open){
  const side=$('#sidebar');if(!side)return;
@@ -1550,10 +1944,29 @@ async function startCRC(){
  timerLoop=setInterval(()=>{updateTimers();checkTimeAlerts()},1000);
  priorityLoop=setInterval(priorityReminder,15000);
  // Realtime é a fonte principal. A consulta abaixo é apenas uma segurança eventual.
- setInterval(()=>{if(cloudSessionAllowed()&&!syncInFlight&&!isReceivingOperationLocked()&&Date.now()-lastLocalMutationAt>3000)pullCloud(false)},60000);
+ setInterval(()=>{if(cloudSessionAllowed()&&!syncInFlight&&!isReceivingOperationLocked()&&Date.now()-lastLocalMutationAt>3000)pullCloud(false)},30000);
 }
 startCRC();
-// CRC V10.5: prioridade persistente, Realtime forçado por evento, PWA alinhado ao CCPB e retry silencioso do Supabase.
+// CRC V10.9: fluxo contínuo, Realtime com dupla via, pull ao retornar ao app e atualização manual.
+
+document.addEventListener('click',e=>{
+ const logout=e.target.closest('#logoutBtn');
+ if(logout){e.preventDefault();e.stopPropagation();logoutNow('Saiu do sistema');}
+});
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='visible'&&session&&navigator.onLine){
+   startCloudSession({pull:true});
+ }
+});
+window.addEventListener('online',()=>{if(session)startCloudSession({pull:true})});
+
+document.addEventListener('submit',e=>{
+ const f=e.target;
+ if(!f||!['planForm','patioForm','priorityForm'].includes(f.id))return;
+ if(f.dataset.submitting==='1'){e.preventDefault();e.stopImmediatePropagation();return;}
+ f.dataset.submitting='1';
+ setTimeout(()=>{if(f)f.dataset.submitting='0'},900);
+},true);
 </script>
 
 
