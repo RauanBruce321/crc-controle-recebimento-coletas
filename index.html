@@ -354,9 +354,19 @@ body.crc-dark #app td{border-color:#2a354b}
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const DBKEY='crc_v1_state', BACKUPKEY='crc_v1_internal_backup', SESSION='crc_v1_session', SESSION_PERSIST='crc_v1_session_persist';
-const SUPABASE_URL='https://spnbmojzoebzehzkcwuj.supabase.co';
-const SUPABASE_KEY='sb_publishable_9b8gteZOKKKoly9dw5K8bA_2btDk_cz';
-const SUPABASE_TABLE='crc';
+const SUPABASE_URL='https://fftgwqcschdxczjuqfur.supabase.co';
+const SUPABASE_KEY='sb_publishable_qlEJOCL5l6Ejhz4G3iqWGQ_OZfhNpe1';
+const SUPABASE_TABLE='crc'; // legado: mantido apenas para compatibilidade de leitura/migração
+const CRC_NORMALIZED_TABLES={
+ plan:'crc_previsoes',drivers:'crc_motoristas',docks:'crc_docas',
+ patio:'crc_veiculos',active:'crc_veiculos',history:'crc_historico',priorities:'crc_prioridades',logs:'crc_logs',turns:'crc_turnos'
+};
+// O projeto novo usa somente as 8 tabelas operacionais criadas no Supabase.
+// Usuários, tipologias e preferências permanecem no próprio app; veículos de pátio e em descarga
+// compartilham crc_veiculos e são distinguidos pelo campo _crc_kind dentro de dados.
+const CRC_CONFIG_TABLE='';
+const CRC_CONFIG_ID='principal';
+const USE_NORMALIZED_SUPABASE=true;
 const SUPABASE_ROW_ID='principal';
 const nowISO=()=>new Date().toISOString(), brDate=x=>new Date(x).toLocaleString('pt-BR');
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
@@ -380,7 +390,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:14},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'11.6',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'13.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -460,7 +470,7 @@ function normalizeStateShape(target){
 }
 state=normalizeStateShape(state);
 
-/* CRC V12.0 — sincronização direta global por eventos/deltas.
+/* CRC V13.0 — sincronização direta global por eventos/deltas.
    Carga completa somente ao abrir/reabrir; durante o uso, os aparelhos online recebem pelo Realtime Broadcast somente o que mudou. */
 const CRC_SYNC_ARRAYS=['users','typologies','plan','drivers','docks','patio','active','history','priorities','logs','turns'];
 let syncBaseState=null;
@@ -478,7 +488,12 @@ function crcEntityKey(kind,item){
  return String(item.name||item.username||item.plate||'');
 }
 function crcStable(v){
- try{return JSON.stringify(v,Object.keys(v||{}).sort())}catch(e){try{return JSON.stringify(v)}catch(_){return String(v)}}
+ const canonical=x=>{
+  if(Array.isArray(x))return x.map(canonical);
+  if(x&&typeof x==='object')return Object.keys(x).sort().reduce((o,k)=>(o[k]=canonical(x[k]),o),{});
+  return x;
+ };
+ try{return JSON.stringify(canonical(v))}catch(e){try{return JSON.stringify(v)}catch(_){return String(v)}}
 }
 function buildStateDelta(base,current){
  base=normalizeStateShape(cloneCRC(base||seed()));
@@ -666,7 +681,7 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='12.0';
+ state.version='13.0';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
@@ -1126,7 +1141,7 @@ function renderAdmin(){
  <div class="panel"><div class="panel-title"><h3>Armazenamento</h3></div><p><b>Uso local estimado:</b> ${storageKB} KB</p><p><b>Registros:</b> ${state.history.length} finalizados, ${state.active.length} ativos e ${state.logs.length} logs.</p><p><b>Supabase:</b> ${state.settings.supabaseEnabled?'Ativado':'Desativado'}</p><p><b>Última sincronização:</b> ${state.settings.lastSync?brDate(state.settings.lastSync):'Nunca'}</p><p><b>Backup interno:</b> ${state.settings.autoBackup!==false?'Ativado':'Desativado'}</p><div class="inline"><button id="syncNowBtn" class="btn btn-soft">Salvar agora no Data Center</button><button id="restoreInternalBtn" class="btn btn-warning">Restaurar backup interno</button></div></div></div>
  <div class="panel"><div class="panel-title"><h3>Usuários</h3></div><div class="table-wrap"><table><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Status</th><th>Ação</th></tr></thead><tbody>${[...new Map(state.users.map(u=>[String(u.username||'').toLowerCase(),u])).values()].map(u=>`<tr><td>${esc(u.name)}</td><td>${esc(u.username)}</td><td>${roleName(u.role)}</td><td>${u.active?'Ativo':'Inativo'}</td><td><button class="btn btn-soft edit-user" data-id="${u.id}">Editar</button>${u.username!=='admin'?` <button class="btn btn-danger delete-user" data-id="${u.id}">Excluir</button>`:''}</td></tr>`).join('')}</tbody></table></div></div>
  <div class="grid-2"><div class="panel"><div class="panel-title"><h3>Tempos por tipologia</h3></div><form id="typForm"><div class="inline"><div><label>Tipologia</label><input id="typName" required></div><div><label>Tempo-meta (min)</label><input id="typTime" type="number" min="1" required></div><div><button class="btn btn-primary">Adicionar</button></div></div></form><div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Tipologia</th><th>Tempo</th><th>Ação</th></tr></thead><tbody>${state.typologies.map(t=>`<tr><td>${esc(t.name)}</td><td><input class="typ-time" data-name="${esc(t.name)}" type="number" min="1" value="${t.targetMin}" style="width:90px"></td><td><button class="btn btn-danger delete-typ" data-name="${esc(t.name)}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>
- <div class="panel"><div class="panel-title"><h3>Supabase conectado</h3></div><p class="small">Banco online ativo na tabela <span class="code">crc</span>. O CRC salva automaticamente no Supabase e mantém backup local de segurança.</p><form id="supabaseForm"><label>Project URL</label><input id="supaUrl" value="${esc(SUPABASE_URL)}" readonly><label style="margin-top:10px">Publishable Key</label><textarea id="supaKey" rows="3" readonly>${esc(SUPABASE_KEY)}</textarea><input id="supaEnabled" type="checkbox" checked hidden><label style="margin-top:10px"><input id="autoBackupEnabled" type="checkbox" style="width:auto" ${state.settings.autoBackup!==false?'checked':''}> Salvar backup interno automaticamente</label><div style="margin-top:10px"><button class="btn btn-primary">Sincronizar agora</button></div></form></div></div>
+ <div class="panel"><div class="panel-title"><h3>Supabase conectado</h3></div><p class="small">Banco online ativo nas 8 tabelas do <span class="code">CRC-PRODUCAO</span>. O CRC salva automaticamente no Supabase e mantém backup local de segurança.</p><form id="supabaseForm"><label>Project URL</label><input id="supaUrl" value="${esc(SUPABASE_URL)}" readonly><label style="margin-top:10px">Publishable Key</label><textarea id="supaKey" rows="3" readonly>${esc(SUPABASE_KEY)}</textarea><input id="supaEnabled" type="checkbox" checked hidden><label style="margin-top:10px"><input id="autoBackupEnabled" type="checkbox" style="width:auto" ${state.settings.autoBackup!==false?'checked':''}> Salvar backup interno automaticamente</label><div style="margin-top:10px"><button class="btn btn-primary">Sincronizar agora</button></div></form></div></div>
  <div class="panel"><div class="panel-title"><h3>Manutenção</h3></div><div class="inline"><button id="backupBtn" class="btn btn-success">Baixar backup JSON</button><button id="clearAllBtn" class="btn btn-danger">Zerar tudo lançado</button></div></div>`;
 }
 function renderLogs(){return pageHead('Histórico do Sistema','Entradas, lançamentos, alterações e finalizações.')+`<div class="panel"><div class="table-wrap"><table><thead><tr><th>Data/hora</th><th>Usuário</th><th>Perfil</th><th>Operação</th><th>Ação</th><th>Detalhe</th></tr></thead><tbody>${state.logs.map(l=>`<tr><td>${brDate(l.at)}</td><td>${esc(l.user)}</td><td>${roleName(l.role)}</td><td>${esc(l.operation)}</td><td>${esc(l.action)}</td><td>${esc(l.detail)}</td></tr>`).join('')}</tbody></table></div></div>`}
@@ -1214,10 +1229,11 @@ async function startReceiving(e){
    const dockRow=state.docks.find(d=>d.number===dock);if(dockRow)dockRow.status='Ocupada';
   log('Iniciou descarregamento',`${driver.name} • Doca ${dock} • HC ${hc}`,false);
   save(false);
+  const startConfirmed=state.settings.supabaseEnabled?await syncCloud(true):true;
+  if(!startConfirmed)throw new Error('Supabase não confirmou o início do descarregamento');
   pendingIncomingState=null;unlockReceivingOperation({applyPending:false,refresh:false});refreshUI(false);
-  if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),60)}
 
-toast('Descarregamento iniciado e salvo.','ok');
+toast('Descarregamento iniciado e confirmado no Supabase.','ok');
 
 const legendaInicio=
 `🚛 INÍCIO DO DESCARREGAMENTO
@@ -1252,8 +1268,8 @@ setTimeout(async()=>{
 
 }catch(err){
  console.error('Erro ao iniciar descarregamento:',err);
- toast('Não foi possível iniciar. Os dados locais foram preservados.','error',9000);
- try{persistLocalSnapshot()}catch(e){}
+ toast('Não foi possível iniciar. A ação não foi confirmada pelo Supabase.','error',9000);
+ try{await pullCloud(true)}catch(e){}
 }finally{
  startingReceiving=false;
  if(submit&&document.body.contains(submit)){submit.disabled=false;submit.textContent=originalText;}
@@ -1438,17 +1454,12 @@ async function finishReceiving(e,id){
   );
 
   save(false);
+  const finishConfirmed=state.settings.supabaseEnabled?await syncCloud(true):true;
+  if(!finishConfirmed)throw new Error('Supabase não confirmou a finalização');
 
   closeModal();
-
   refreshUI();
-
-  if(state.settings.supabaseEnabled){
-   clearTimeout(syncTimer);
-   syncTimer=setTimeout(()=>syncCloud(true),60);
-  }
-
-  toast('Veículo finalizado, salvo e doca liberada.','ok');
+  toast('Veículo finalizado, confirmado no Supabase e doca liberada.','ok');
 
   /* ===== COMPARTILHAR FOTO FINAL ===== */
 
@@ -1492,14 +1503,12 @@ Data: ${new Date().toLocaleString('pt-BR')}`;
   console.error('Erro ao finalizar descarregamento:',err);
 
   toast(
-   'Não foi possível finalizar. O veículo continua preservado localmente.',
+   'Não foi possível finalizar. A ação não foi confirmada pelo Supabase.',
    'error',
    9000
   );
 
-  try{
-   persistLocalSnapshot();
-  }catch(e){}
+  try{await pullCloud(true)}catch(e){}
 
  }finally{
 
@@ -1655,7 +1664,7 @@ async function closeOperationalDay(){
  stopCloudSession();clearTimeout(syncTimer);syncQueued=false;syncInFlight=false;
  const resetEpoch=Date.now(),stamp=nowISO();
  const keep={users:state.users.filter(u=>['tower','receiving','patio'].includes(u.role)),drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||stamp,updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch,lastEvent:null}};
- state={version:'11.6',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
+ state={version:'13.0',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
  enforceDefaultAccessAndDedupe();localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();lastAppliedCloudFingerprint=cloudFingerprint(state);
  try{
    initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
@@ -1829,7 +1838,7 @@ function mergeStates(local,remote){
 
  const occupied=new Set(merged.active.map(a=>a.dock));
  merged.docks=uniqueDocks(merged.docks).map(d=>({...d,status:occupied.has(d.number)?'Ocupada':(d.status==='Ocupada'?'Livre':d.status)}));
- merged.version='12.0';
+ merged.version='13.0';
  merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();
  merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
  return normalizeStateShape(merged);
@@ -1878,155 +1887,138 @@ function scheduleCloudPull(delay=250){
 
 }
 
+function normalizedKindFromTable(table){return Object.keys(CRC_NORMALIZED_TABLES).find(k=>CRC_NORMALIZED_TABLES[k]===table)||''}
+function kindFromVehicleRow(row){
+ const k=row?.dados?._crc_kind;
+ if(k==='patio'||k==='active')return k;
+ const st=String(row?.dados?.status||'').toLowerCase();
+ return st.includes('descarreg')?'active':'patio';
+}
+function stripCloudMeta(item){const x=cloneCRC(item||{});if(x&&typeof x==='object')delete x._crc_kind;return x}
+function applyNormalizedRealtime(kind,payload){
+ if(!kind||!payload)return;
+ const event=payload.eventType;
+ const row=event==='DELETE'?payload.old:payload.new;
+ const id=String(row?.id||'');
+ if(!id)return;
+ if(payload.table==='crc_veiculos')kind=kindFromVehicleRow(row);
+ const arr=Array.isArray(state[kind])?state[kind]:[];
+ const idx=arr.findIndex(x=>crcEntityKey(kind,x)===id);
+ if(event==='DELETE'){
+  if(idx>=0)arr.splice(idx,1);
+ }else{
+  const item=stripCloudMeta(row?.dados||{});
+  if(!item||typeof item!=='object')return;
+  if(!item.id)item.id=id;
+  item.updatedAt=row?.ultima_alteracao||item.updatedAt||nowISO();
+  if(idx>=0){
+   const oldTime=Date.parse(arr[idx]?.updatedAt||arr[idx]?.createdAt||0)||0;
+   const newTime=Date.parse(item.updatedAt||item.createdAt||0)||0;
+   if(newTime>=oldTime)arr[idx]={...arr[idx],...item};
+  }else arr.push(item);
+ }
+ state[kind]=arr;
+ enforceDefaultAccessAndDedupe();
+ persistLocalSnapshot();
+ // Não troca a base de comparação enquanto um envio local está em andamento.
+ // Isso evita que o eco do Realtime faça outras alterações da mesma ação desaparecerem.
+ if(!syncInFlight)syncBaseState=cloneCRC(state);
+ if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(30);
+}
 function initRealtime(){
  if(!cloudSessionAllowed())return;
  initSupabase();if(!supabaseClient||supabaseChannel)return;
  realtimeReady=false;
- supabaseChannel=supabaseClient
-  .channel('crc-live-v116',{config:{broadcast:{self:false,ack:true}}})
-  .on('broadcast',{event:'crc-delta'},({payload})=>{
-    try{
-      if(!payload||payload.from===session?.name&&payload.id===state.meta?.lastEvent?.id)return;
-      const beforeRev=Number(state.meta?.revision||0);
-      const incomingRev=Number(payload.revision||0);
-      if(isReceivingOperationLocked()){
-        applyStateDelta(payload,{refresh:false});
-      }else{
-        applyStateDelta(payload,{refresh:true});
-      }
-      if(payload.cloudStamp)baseCloudStamp=payload.cloudStamp;
-      // Se houver salto de revisão, este aparelho pode ter perdido um evento.
-      // Aplica o evento recebido na hora e confirma a fotografia oficial em seguida.
-      if(incomingRev>beforeRev+1)setTimeout(()=>consistencyProbe(true),120);
-    }catch(e){
-      console.warn('CRC: falha ao aplicar delta Realtime.',e);
-      scheduleCloudPull(250);
-    }
-  })
-  .on('broadcast',{event:'crc-reset'},({payload})=>{
-    // Reset/finalização de ciclo: busca a fotografia oficial uma única vez.
-    if(payload?.resetEpoch && Number(payload.resetEpoch)>=Number(state.meta?.resetEpoch||0))scheduleCloudPull(80);
-  })
-  .subscribe(status=>{
-    realtimeReady=status==='SUBSCRIBED';
-    if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
-      realtimeReady=false;
-      try{supabaseClient.removeChannel(supabaseChannel)}catch(e){}
-      supabaseChannel=null;
-      if(cloudSessionAllowed())setTimeout(initRealtime,2500);
-    }
+ let ch=supabaseClient.channel('crc-producao-v13');
+ const uniqueTables=[...new Set(Object.values(CRC_NORMALIZED_TABLES))];
+ uniqueTables.forEach(table=>{
+  ch=ch.on('postgres_changes',{event:'*',schema:'public',table},payload=>{
+   try{
+    const kind=table==='crc_veiculos'?kindFromVehicleRow(payload.eventType==='DELETE'?payload.old:payload.new):normalizedKindFromTable(table);
+    applyNormalizedRealtime(kind,{...payload,table});
+   }catch(e){console.warn('CRC: falha Realtime em '+table,e)}
   });
+ });
+ supabaseChannel=ch.subscribe(status=>{
+  realtimeReady=status==='SUBSCRIBED';
+  if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
+   realtimeReady=false;
+   try{supabaseClient.removeChannel(supabaseChannel)}catch(e){}
+   supabaseChannel=null;
+   if(cloudSessionAllowed())setTimeout(initRealtime,2500);
+  }
+ });
 }
 async function pullCloud(force=false){
  if(!cloudSessionAllowed())return false;
- initSupabase();
- if(!supabaseClient)return false;
- let lastError=null;
-
- for(let attempt=0;attempt<3;attempt++){
-  try{
-   const {data,error}=await supabaseClient
-    .from(SUPABASE_TABLE)
-    .select('dados,atualizado_em')
-    .eq('id',SUPABASE_ROW_ID)
-    .maybeSingle();
-   if(error)throw error;
-
-   if(data?.dados){
-    const incoming=normalizeStateShape(cloneCRC(data.dados));
-    incoming.settings={...(incoming.settings||{}),supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
-    enforceIncomingDedupe(incoming);
-
-    if(force||!localDirty){
-      const localSettings={...(state.settings||{})};
-      if(force){
-       // Atualização manual/reconexão: Supabase é a verdade oficial.
-       state=incoming;
-      }else{
-       state=mergeStates(state,incoming);
-      }
-      enforceDefaultAccessAndDedupe();
-      state.settings={...(state.settings||{}),supabaseUrl:localSettings.supabaseUrl||SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
-      persistLocalSnapshot();
-      syncBaseState=cloneCRC(state);
-      baseCloudStamp=data?.atualizado_em||baseCloudStamp;
-      lastAppliedCloudFingerprint=cloudFingerprint(state);
-      if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(40);
-    }
-   }else{
-    await syncCloud(true);
-   }
-   return true;
-  }catch(e){
-   lastError=e;
-   console.warn(`CRC: tentativa ${attempt+1} de carregar Supabase falhou.`,e);
-   if(attempt<2)await new Promise(r=>setTimeout(r,350*(attempt+1)));
-  }
- }
- console.error('CRC: falha ao carregar Supabase.',lastError);
- if(document.visibilityState==='visible')toast('Conexão temporariamente instável. O CRC continuará tentando sincronizar.','attention',5500);
- return false;
-}
-
-async function syncCloud(silent=false){
- if(!cloudSessionAllowed()){syncQueued=true;return false}
- initSupabase();
- if(!supabaseClient){if(!silent)toast('Supabase indisponível.','error');return false}
- if(syncInFlight){syncQueued=true;return true}
-
- syncInFlight=true;
+ initSupabase();if(!supabaseClient)return false;
  try{
-  enforceDefaultAccessAndDedupe();
-
-  // Captura SOMENTE a alteração local desde a última fotografia conhecida.
-  const base=syncBaseState?cloneCRC(syncBaseState):cloneCRC(state);
-  const localDelta=buildStateDelta(base,state);
-  if(!localDelta){
-   localDirty=false;
-   return true;
+  const next=normalizeStateShape(cloneCRC(seed()));
+  const localSettings={...(state.settings||{})};
+  // Preserva cadastros internos que não possuem tabela no projeto novo.
+  next.users=cloneCRC(state.users||next.users);next.typologies=cloneCRC(state.typologies||next.typologies);
+  const tableRows={};
+  for(const table of [...new Set(Object.values(CRC_NORMALIZED_TABLES))]){
+   const {data,error}=await supabaseClient.from(table).select('id,dados,ultima_alteracao');
+   if(error)throw error; tableRows[table]=data||[];
   }
-
+  for(const [kind,table] of Object.entries(CRC_NORMALIZED_TABLES)){
+   let rows=tableRows[table]||[];
+   if(table==='crc_veiculos')rows=rows.filter(r=>kindFromVehicleRow(r)===kind);
+   next[kind]=rows.map(row=>{
+    const item=stripCloudMeta(row.dados||{});
+    if(!item.id)item.id=String(row.id);
+    if(row.ultima_alteracao)item.updatedAt=row.ultima_alteracao;
+    return item;
+   });
+  }
+  next.settings={...next.settings,...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
+  next.version='13.0';
+  state=normalizeStateShape(next);
   enforceDefaultAccessAndDedupe();
-  const payload=cloneCRC(state);
-  const sentStamp=nowISO();
-  payload.meta=payload.meta||{};
-  payload.meta.updatedAt=sentStamp;
-  payload.version='12.0';
-  payload.settings={...(payload.settings||{}),supabaseUrl:SUPABASE_URL,supabaseKey:'',supabaseEnabled:true};
-
-  // Uma gravação oficial por ação agrupada.
-  const {error}=await supabaseClient.from(SUPABASE_TABLE).upsert(
-   {id:SUPABASE_ROW_ID,dados:payload,atualizado_em:sentStamp},
-   {onConflict:'id'}
-  );
-  if(error)throw error;
-
-  // Só o delta trafega em tempo real para os outros aparelhos.
-  localDelta.revision=Number(payload.meta?.revision||0);
-  localDelta.cloudStamp=sentStamp;
-  await broadcastStateDelta(localDelta);
-
-  state.meta.updatedAt=sentStamp;
-  state.settings.lastSync=sentStamp;
-  localDirty=false;
-  baseCloudStamp=sentStamp;
-  syncBaseState=cloneCRC(state);
-  lastAppliedCloudFingerprint=cloudFingerprint(state);
-  persistLocalSnapshot();
-
-  if(!silent)toast('Sincronização concluída.','ok');
+  persistLocalSnapshot();syncBaseState=cloneCRC(state);localDirty=false;
+  if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(30);
   return true;
  }catch(e){
-  console.error('CRC: falha na sincronização.',e);
-  if(!silent)toast('Falha na sincronização: '+e.message,'error');
+  console.error('CRC: falha ao carregar tabelas separadas do Supabase.',e);
+  if(document.visibilityState==='visible')toast('Falha ao atualizar dados do Supabase.','error',6500);
   return false;
+ }
+}
+async function syncCloud(silent=false){
+ if(!cloudSessionAllowed()){syncQueued=true;return false}
+ initSupabase();if(!supabaseClient){if(!silent)toast('Supabase indisponível.','error');return false}
+ if(syncInFlight){syncQueued=true;return true}
+ syncInFlight=true;
+ const beforeSync=cloneCRC(syncBaseState||state);
+ try{
+  enforceDefaultAccessAndDedupe();
+  const base=syncBaseState?cloneCRC(syncBaseState):normalizeStateShape(cloneCRC(seed()));
+  const delta=buildStateDelta(base,state);
+  if(!delta){localDirty=false;return true}
+  for(const [kind,items] of Object.entries(delta.upserts||{})){
+   const table=CRC_NORMALIZED_TABLES[kind];if(!table||!items?.length)continue;
+   const rows=items.map(item=>{
+    const dados=cloneCRC(item);if(table==='crc_veiculos')dados._crc_kind=kind;
+    return {id:crcEntityKey(kind,item),dados};
+   });
+   const {error}=await supabaseClient.from(table).upsert(rows,{onConflict:'id'});if(error)throw error;
+  }
+  for(const [kind,ids] of Object.entries(delta.deletes||{})){
+   const table=CRC_NORMALIZED_TABLES[kind];if(!table||!ids?.length)continue;
+   // IDs são únicos no fluxo; apagar o registro é a fonte oficial da remoção.
+   const {error}=await supabaseClient.from(table).delete().in('id',ids.map(String));if(error)throw error;
+  }
+  state.settings.lastSync=nowISO();localDirty=false;syncBaseState=cloneCRC(state);persistLocalSnapshot();
+  if(!silent)toast('Alteração confirmada no Supabase.','ok');return true;
+ }catch(e){
+  console.error('CRC: alteração NÃO confirmada no Supabase.',e);
+  // Servidor é a fonte da verdade: em falha, reconcilia em vez de deixar uma ação fantasma na tela.
+  try{await pullCloud(true)}catch(_){}
+  if(!silent)toast('Não foi possível atualizar. Tente novamente.','error',8000);return false;
  }finally{
   syncInFlight=false;
-  if(syncQueued){
-   syncQueued=false;
-   clearTimeout(syncTimer);
-   syncTimer=setTimeout(()=>syncCloud(true),450);
-  }
+  if(syncQueued){syncQueued=false;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),300)}
  }
 }
 function restoreInternalBackup(){
@@ -2041,17 +2033,18 @@ function resetDemo(){if(confirm('Restaurar dados de demonstração?')){state=see
 async function clearAll(){
  if(!confirm('ZERAR TUDO que foi lançado? Serão apagados previsões, prioridades, recebimentos, veículos ativos e histórico. Usuários, motoristas, docas, tipologias e configurações serão mantidos. Somente os dados operacionais serão apagados.'))return;
  if(!confirm('Confirma a limpeza total dos dados operacionais? Esta ação não pode ser desfeita.'))return;
- const keep={users:state.users,drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||nowISO(),updatedAt:nowISO(),revision:Number(state.meta?.revision||0)+1,resetEpoch:Number(state.meta?.resetEpoch||0)+1}};
- state={version:'11.6',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
- enforceDefaultAccessAndDedupe();
- localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();
  try{
-  initSupabase();
-  if(!supabaseClient)throw new Error('Supabase indisponível');
-  const payload=JSON.parse(JSON.stringify(state));payload.settings={...(payload.settings||{}),supabaseUrl:SUPABASE_URL,supabaseKey:'',supabaseEnabled:true};
-  const {error}=await supabaseClient.from(SUPABASE_TABLE).upsert({id:SUPABASE_ROW_ID,dados:payload,atualizado_em:payload.meta.updatedAt},{onConflict:'id'});if(error)throw error;
-  state.settings.lastSync=nowISO();syncBaseState=cloneCRC(state);persistLocalSnapshot();try{await supabaseChannel?.send({type:'broadcast',event:'crc-reset',payload:{resetEpoch:state.meta.resetEpoch,at:state.meta.updatedAt}})}catch(e){}refreshUI(false);toast('Sistema operacional zerado no aparelho e no Supabase.','ok',7000);
- }catch(e){persistLocalSnapshot();render();toast('Dados locais zerados, mas houve falha ao zerar o Supabase: '+e.message,'error',10000)}
+  initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
+  // Limpa somente tabelas operacionais. Motoristas e docas permanecem cadastrados.
+  for(const table of ['crc_previsoes','crc_prioridades','crc_veiculos','crc_historico','crc_logs','crc_turnos']){
+   const {error}=await supabaseClient.from(table).delete().not('id','is',null);if(error)throw error;
+  }
+  state.plan=[];state.patio=[];state.active=[];state.history=[];state.priorities=[];state.logs=[];state.turns=[];
+  state.docks=uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'}));
+  state.meta={...(state.meta||{}),updatedAt:nowISO(),revision:Number(state.meta?.revision||0)+1,resetEpoch:Number(state.meta?.resetEpoch||0)+1};
+  localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();syncBaseState=cloneCRC(state);localDirty=false;refreshUI(false);
+  toast('Sistema operacional zerado no aparelho e no Supabase.','ok',7000);
+ }catch(e){toast('Falha ao zerar o Supabase: '+e.message,'error',10000)}
 }
 function updateTimers(){
  $$('[data-start]').forEach(el=>{const start=Date.parse(el.dataset.start),sec=Math.max(0,Math.floor((Date.now()-(Number.isFinite(start)?start:Date.now()))/1000)),h=String(Math.floor(sec/3600)).padStart(2,'0'),m=String(Math.floor(sec%3600/60)).padStart(2,'0'),s=String(sec%60).padStart(2,'0');el.textContent=`${h}:${m}:${s}`});
@@ -2104,12 +2097,9 @@ async function startCRC(){
  timerLoop=setInterval(()=>{updateTimers();checkTimeAlerts()},1000);
  priorityLoop=setInterval(priorityReminder,15000);
  // Realtime é a fonte principal. A consulta abaixo é apenas uma segurança eventual.
- // Aparelho ativo: validação leve (somente atualizado_em) a cada 20s.
-  // Só baixa o estado completo se detectar que perdeu alguma alteração.
-  setInterval(()=>{if(cloudSessionAllowed()&&!isReceivingOperationLocked()&&!localDirty)consistencyProbe(false)},20000);
 }
 startCRC();
-// CRC V12.0: carga inicial única -> ação -> confirmação Supabase -> Realtime delta. Sem polling e sem reconciliação automática concorrente.
+// CRC V13.0: carga inicial única -> ação -> confirmação Supabase -> Realtime delta. Sem polling e sem reconciliação automática concorrente.
 
 document.addEventListener('click',e=>{
  const logout=e.target.closest('#logoutBtn');
