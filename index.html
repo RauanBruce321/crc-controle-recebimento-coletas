@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V11.4 SINCRONIA CONSISTENTE</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V11.5 REALTIME POR EVENTOS</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -380,7 +380,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:14},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'11.4',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'11.5',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -459,6 +459,115 @@ function normalizeStateShape(target){
  return target;
 }
 state=normalizeStateShape(state);
+
+/* CRC V11.5 — sincronização global por eventos/deltas.
+   O estado completo continua persistido no Supabase para recuperação,
+   mas os aparelhos online recebem pelo Realtime Broadcast somente o que mudou. */
+const CRC_SYNC_ARRAYS=['users','typologies','plan','drivers','docks','patio','active','history','priorities','logs','turns'];
+let syncBaseState=null;
+let realtimeReady=false;
+
+function cloneCRC(v){return JSON.parse(JSON.stringify(v??null));}
+function crcEntityKey(kind,item){
+ if(!item)return '';
+ if(item.id!=null&&item.id!=='')return String(item.id);
+ if(kind==='typologies')return String(item.name||'');
+ if(kind==='docks')return String(item.number||'');
+ return String(item.name||item.username||item.plate||'');
+}
+function crcStable(v){
+ try{return JSON.stringify(v,Object.keys(v||{}).sort())}catch(e){try{return JSON.stringify(v)}catch(_){return String(v)}}
+}
+function buildStateDelta(base,current){
+ base=normalizeStateShape(cloneCRC(base||seed()));
+ current=normalizeStateShape(cloneCRC(current||state));
+ const delta={
+  id:uid(),at:nowISO(),from:session?.name||'Sistema',
+  resetEpoch:Number(current.meta?.resetEpoch||0),
+  upserts:{},deletes:{},
+  lastEvent:cloneCRC(current.meta?.lastEvent||null)
+ };
+ let changed=false;
+ for(const kind of CRC_SYNC_ARRAYS){
+  const oldMap=new Map((base[kind]||[]).map(x=>[crcEntityKey(kind,x),x]).filter(x=>x[0]));
+  const newMap=new Map((current[kind]||[]).map(x=>[crcEntityKey(kind,x),x]).filter(x=>x[0]));
+  const ups=[], dels=[];
+  for(const [key,item] of newMap){
+   const old=oldMap.get(key);
+   if(!old || JSON.stringify(old)!==JSON.stringify(item))ups.push(cloneCRC(item));
+  }
+  for(const key of oldMap.keys())if(!newMap.has(key))dels.push(key);
+  if(ups.length){delta.upserts[kind]=ups;changed=true}
+  if(dels.length){delta.deletes[kind]=dels;changed=true}
+ }
+ return changed?delta:null;
+}
+function applyStateDelta(delta,{refresh=true}={}){
+ if(!delta||typeof delta!=='object')return false;
+ state=normalizeStateShape(state);
+ const remoteReset=Number(delta.resetEpoch||0), localReset=Number(state.meta?.resetEpoch||0);
+ if(remoteReset&&remoteReset<localReset)return false;
+
+ for(const kind of CRC_SYNC_ARRAYS){
+  let arr=Array.isArray(state[kind])?state[kind]:[];
+  const dels=new Set((delta.deletes?.[kind]||[]).map(String));
+  if(dels.size)arr=arr.filter(x=>!dels.has(crcEntityKey(kind,x)));
+
+  const ups=delta.upserts?.[kind]||[];
+  if(ups.length){
+   const map=new Map(arr.map(x=>[crcEntityKey(kind,x),x]).filter(x=>x[0]));
+   for(const item of ups){
+    const key=crcEntityKey(kind,item); if(!key)continue;
+    const old=map.get(key);
+    const oldTime=Date.parse(old?.updatedAt||old?.createdAt||0)||0;
+    const newTime=Date.parse(item?.updatedAt||item?.createdAt||delta.at||0)||0;
+    if(!old || newTime>=oldTime)map.set(key,{...(old||{}),...cloneCRC(item)});
+   }
+   arr=[...map.values()];
+  }
+  state[kind]=arr;
+ }
+
+ state.meta=state.meta||{};
+ if(remoteReset>localReset)state.meta.resetEpoch=remoteReset;
+ if(delta.lastEvent)state.meta.lastEvent=cloneCRC(delta.lastEvent);
+ state.meta.updatedAt=delta.at||nowISO();
+ state.meta.revision=Math.max(Number(state.meta.revision||0),Number(delta.revision||0));
+
+ // Regras operacionais: concluído não volta, pátio consumido não volta e docas seguem os ativos.
+ enforceDefaultAccessAndDedupe();
+ const completed=new Set([...(state.meta.completedVehicleIds||[]),(state.history||[]).map(x=>x.id)].flat().filter(Boolean));
+ state.meta.completedVehicleIds=[...completed];
+ state.active=(state.active||[]).filter(x=>!completed.has(x.id));
+ const activeDriverIds=new Set(state.active.map(x=>x.driverId).filter(Boolean));
+ const activePlates=new Set(state.active.map(x=>normalizeDriverPlate(x.plate)).filter(Boolean));
+ state.patio=(state.patio||[]).filter(x=>!activeDriverIds.has(x.driverId)&&!activePlates.has(normalizeDriverPlate(x.plate)));
+ const occupied=new Set(state.active.map(x=>x.dock).filter(Boolean));
+ state.docks=uniqueDocks(state.docks).map(d=>({...d,status:occupied.has(d.number)?'Ocupada':(d.status==='Ocupada'?'Livre':d.status)}));
+
+ persistLocalSnapshot();
+ syncBaseState=cloneCRC(state);
+ lastAppliedCloudFingerprint=cloudFingerprint(state);
+
+ const evt=delta.lastEvent;
+ if(evt?.id&&evt.id!==lastNotifiedEventId&&evt.user!==session?.name){
+  lastNotifiedEventId=evt.id;
+  if(/prioridade/i.test(evt.action||''))toast(`${evt.action}${evt.detail?' • '+evt.detail:''}`,'priority',8000);
+ }
+ if(refresh&&!isReceivingOperationLocked())scheduleVisualRefresh(40);
+ return true;
+}
+async function broadcastStateDelta(delta){
+ if(!delta||!supabaseChannel||!realtimeReady)return false;
+ try{
+  const r=await supabaseChannel.send({type:'broadcast',event:'crc-delta',payload:delta});
+  return r==='ok'||r===true||r?.status==='ok';
+ }catch(e){
+  console.warn('CRC: Broadcast Realtime indisponível; pull de recuperação continuará ativo.',e);
+  return false;
+ }
+}
+
 function keepOnlyCurrentOperationalDay(target){
  // V11.4: o ciclo operacional NÃO é mais apagado na virada do dia.
  // Os dados permanecem até a Torre usar "Finalizar ciclo, baixar e zerar".
@@ -524,7 +633,7 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='11.4';
+ state.version='11.5';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
@@ -1507,7 +1616,7 @@ async function closeOperationalDay(){
  stopCloudSession();clearTimeout(syncTimer);syncQueued=false;syncInFlight=false;
  const resetEpoch=Date.now(),stamp=nowISO();
  const keep={users:state.users.filter(u=>['tower','receiving','patio'].includes(u.role)),drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||stamp,updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch,lastEvent:null}};
- state={version:'11.4',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
+ state={version:'11.5',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
  enforceDefaultAccessAndDedupe();localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();lastAppliedCloudFingerprint=cloudFingerprint(state);
  try{
    initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
@@ -1681,7 +1790,7 @@ function mergeStates(local,remote){
 
  const occupied=new Set(merged.active.map(a=>a.dock));
  merged.docks=uniqueDocks(merged.docks).map(d=>({...d,status:occupied.has(d.number)?'Ocupada':(d.status==='Ocupada'?'Livre':d.status)}));
- merged.version='11.4';
+ merged.version='11.5';
  merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();
  merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
  return normalizeStateShape(merged);
@@ -1698,6 +1807,7 @@ function stopCloudSession(){
  clearTimeout(cloudPullTimer);
  try{if(supabaseChannel&&supabaseClient)supabaseClient.removeChannel(supabaseChannel)}catch(e){}
  supabaseChannel=null;
+ realtimeReady=false;
 }
 async function startCloudSession({pull=true}={}){
  if(!cloudSessionAllowed())return false;
@@ -1732,17 +1842,31 @@ function scheduleCloudPull(delay=250){
 function initRealtime(){
  if(!cloudSessionAllowed())return;
  initSupabase();if(!supabaseClient||supabaseChannel)return;
+ realtimeReady=false;
  supabaseChannel=supabaseClient
-  .channel('crc-live-v114',{config:{broadcast:{self:false}}})
-  .on('postgres_changes',{event:'*',schema:'public',table:SUPABASE_TABLE,filter:`id=eq.${SUPABASE_ROW_ID}`},payload=>{
-    // O próprio evento já traz o JSON novo: aplica imediatamente, sem esperar outro GET.
-    const incoming=payload?.new?.dados;
-    if(incoming&&typeof incoming==='object'){
-      try{applyIncomingState(incoming,false)}catch(e){console.warn('CRC: falha ao aplicar evento Realtime.',e);scheduleCloudPull(180)}
-    }else scheduleCloudPull(180);
+  .channel('crc-live-v115',{config:{broadcast:{self:false,ack:true}}})
+  .on('broadcast',{event:'crc-delta'},({payload})=>{
+    try{
+      if(!payload||payload.from===session?.name&&payload.id===state.meta?.lastEvent?.id)return;
+      if(isReceivingOperationLocked()){
+        // Não desmonta formulário em uso. O delta é aplicado no estado e a tela atualiza ao liberar.
+        applyStateDelta(payload,{refresh:false});
+      }else{
+        applyStateDelta(payload,{refresh:true});
+      }
+    }catch(e){
+      console.warn('CRC: falha ao aplicar delta Realtime.',e);
+      scheduleCloudPull(250);
+    }
+  })
+  .on('broadcast',{event:'crc-reset'},({payload})=>{
+    // Reset/finalização de ciclo: busca a fotografia oficial uma única vez.
+    if(payload?.resetEpoch && Number(payload.resetEpoch)>=Number(state.meta?.resetEpoch||0))scheduleCloudPull(80);
   })
   .subscribe(status=>{
+    realtimeReady=status==='SUBSCRIBED';
     if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
+      realtimeReady=false;
       try{supabaseClient.removeChannel(supabaseChannel)}catch(e){}
       supabaseChannel=null;
       if(cloudSessionAllowed())setTimeout(initRealtime,2500);
@@ -1753,166 +1877,96 @@ async function pullCloud(force=false){
  if(!cloudSessionAllowed())return false;
  initSupabase();
  if(!supabaseClient)return false;
-
  let lastError=null;
 
  for(let attempt=0;attempt<3;attempt++){
-
   try{
-
    const {data,error}=await supabaseClient
     .from(SUPABASE_TABLE)
     .select('dados,atualizado_em')
     .eq('id',SUPABASE_ROW_ID)
     .maybeSingle();
-
    if(error)throw error;
 
    if(data?.dados){
-
-    const incoming=normalizeStateShape(JSON.parse(JSON.stringify(data.dados)));
-
-    incoming.settings={
-     ...(incoming.settings||{}),
-     supabaseUrl:SUPABASE_URL,
-     supabaseKey:SUPABASE_KEY,
-     supabaseEnabled:true
-    };
-
+    const incoming=normalizeStateShape(cloneCRC(data.dados));
+    incoming.settings={...(incoming.settings||{}),supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
     enforceIncomingDedupe(incoming);
 
-    // Não permitir que uma versão antiga sobrescreva a atual
-    const localStamp=state.meta?.updatedAt||'';
-    const remoteStamp=incoming.meta?.updatedAt||'';
-
-    if(!localDirty){
-      applyIncomingState(incoming,true);
+    if(force||!localDirty){
+      const localSettings={...(state.settings||{})};
+      state=mergeStates(state,incoming);
+      enforceDefaultAccessAndDedupe();
+      state.settings={...(state.settings||{}),supabaseUrl:localSettings.supabaseUrl||SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
+      persistLocalSnapshot();
+      syncBaseState=cloneCRC(state);
+      lastAppliedCloudFingerprint=cloudFingerprint(state);
+      if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(40);
     }
-
    }else{
-
     await syncCloud(true);
-
    }
-
    return true;
-
   }catch(e){
-
    lastError=e;
-
    console.warn(`CRC: tentativa ${attempt+1} de carregar Supabase falhou.`,e);
-
-   if(attempt<2)
-    await new Promise(r=>setTimeout(r,350*(attempt+1)));
-
+   if(attempt<2)await new Promise(r=>setTimeout(r,350*(attempt+1)));
   }
-
  }
-
  console.error('CRC: falha ao carregar Supabase.',lastError);
-
- if(document.visibilityState==='visible')
-  toast('Conexão temporariamente instável. O CRC continuará tentando sincronizar.','attention',5500);
-
+ if(document.visibilityState==='visible')toast('Conexão temporariamente instável. O CRC continuará tentando sincronizar.','attention',5500);
  return false;
 }
 
 async function syncCloud(silent=false){
-
- if(!cloudSessionAllowed()){
-  syncQueued=true;
-  return false;
- }
-
+ if(!cloudSessionAllowed()){syncQueued=true;return false}
  initSupabase();
-
- if(!supabaseClient){
-  if(!silent)toast('Supabase indisponível.','error');
-  return false;
- }
-
- if(syncInFlight){
-  syncQueued=true;
-  return true;
- }
+ if(!supabaseClient){if(!silent)toast('Supabase indisponível.','error');return false}
+ if(syncInFlight){syncQueued=true;return true}
 
  syncInFlight=true;
-
  try{
-
-  // A ação local é a fonte oficial
   enforceDefaultAccessAndDedupe();
-
-  const payload=JSON.parse(JSON.stringify(state));
-
+  const base=syncBaseState?cloneCRC(syncBaseState):cloneCRC(state);
+  const delta=buildStateDelta(base,state);
+  const payload=cloneCRC(state);
   const sentStamp=payload.meta?.updatedAt||nowISO();
+  payload.version='11.5';
+  payload.settings={...(payload.settings||{}),supabaseUrl:SUPABASE_URL,supabaseKey:'',supabaseEnabled:true};
 
-  payload.version='11.4';
-
-  payload.settings={
-   ...(payload.settings||{}),
-   supabaseUrl:SUPABASE_URL,
-   supabaseKey:'',
-   supabaseEnabled:true
-  };
-
-  const {error}=await supabaseClient
-   .from(SUPABASE_TABLE)
-   .upsert(
-    {
-      id:SUPABASE_ROW_ID,
-      dados:payload,
-      atualizado_em:sentStamp
-    },
-    {
-      onConflict:'id'
-    }
-   );
-
+  // Persistência oficial: uma gravação por ação agrupada.
+  const {error}=await supabaseClient.from(SUPABASE_TABLE).upsert(
+   {id:SUPABASE_ROW_ID,dados:payload,atualizado_em:sentStamp},
+   {onConflict:'id'}
+  );
   if(error)throw error;
 
-  state.settings.lastSync=nowISO();
-
-  if((state.meta?.updatedAt||'')===sentStamp){localDirty=false;persistLocalSnapshot();}
-  lastAppliedCloudFingerprint=cloudFingerprint(payload);
-
-  persistLocalSnapshot();
-   // Postgres Changes notifica os demais aparelhos; sem Broadcast/GET redundantes.
-
-
-  if((state.meta?.updatedAt||'')!==sentStamp)
-   syncQueued=true;
-
-  if(!silent)
-   toast('Sincronização concluída.','ok');
-
-  return true;
-
- }catch(e){
-
-  console.error('CRC: falha na sincronização.',e);
-
-  if(!silent)
-   toast('Falha na sincronização: '+e.message,'error');
-
-  return false;
-
- }finally{
-
-  syncInFlight=false;
-
-  if(syncQueued){
-
-   syncQueued=false;
-
-   clearTimeout(syncTimer);
-
-   // reduz chamadas repetidas ao Supabase
-   syncTimer=setTimeout(()=>syncCloud(true),900);
-
+  // Distribuição online: somente os itens alterados/removidos.
+  if(delta){
+   delta.revision=Number(payload.meta?.revision||0);
+   await broadcastStateDelta(delta);
   }
 
+  state.settings.lastSync=nowISO();
+  if((state.meta?.updatedAt||'')===sentStamp)localDirty=false;
+  syncBaseState=cloneCRC(state);
+  lastAppliedCloudFingerprint=cloudFingerprint(state);
+  persistLocalSnapshot();
+
+  if((state.meta?.updatedAt||'')!==sentStamp)syncQueued=true;
+  if(!silent)toast('Sincronização concluída.','ok');
+  return true;
+ }catch(e){
+  console.error('CRC: falha na sincronização.',e);
+  if(!silent)toast('Falha na sincronização: '+e.message,'error');
+  return false;
+ }finally{
+  syncInFlight=false;
+  if(syncQueued){
+   syncQueued=false;
+   clearTimeout(syncTimer);
+   syncTimer=setTimeout(()=>syncCloud(true),700);
+  }
  }
 }
 function restoreInternalBackup(){
@@ -1927,8 +1981,8 @@ function resetDemo(){if(confirm('Restaurar dados de demonstração?')){state=see
 async function clearAll(){
  if(!confirm('ZERAR TUDO que foi lançado? Serão apagados previsões, prioridades, recebimentos, veículos ativos e histórico. Usuários, motoristas, docas, tipologias e configurações serão mantidos. Somente os dados operacionais serão apagados.'))return;
  if(!confirm('Confirma a limpeza total dos dados operacionais? Esta ação não pode ser desfeita.'))return;
- const keep={users:state.users,drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||nowISO(),updatedAt:nowISO(),revision:Number(state.meta?.revision||0)+1}};
- state={version:'11.4',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
+ const keep={users:state.users,drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||nowISO(),updatedAt:nowISO(),revision:Number(state.meta?.revision||0)+1,resetEpoch:Number(state.meta?.resetEpoch||0)+1}};
+ state={version:'11.5',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
  enforceDefaultAccessAndDedupe();
  localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();
  try{
@@ -1936,7 +1990,7 @@ async function clearAll(){
   if(!supabaseClient)throw new Error('Supabase indisponível');
   const payload=JSON.parse(JSON.stringify(state));payload.settings={...(payload.settings||{}),supabaseUrl:SUPABASE_URL,supabaseKey:'',supabaseEnabled:true};
   const {error}=await supabaseClient.from(SUPABASE_TABLE).upsert({id:SUPABASE_ROW_ID,dados:payload,atualizado_em:payload.meta.updatedAt},{onConflict:'id'});if(error)throw error;
-  state.settings.lastSync=nowISO();persistLocalSnapshot();try{await supabaseChannel?.send({type:'broadcast',event:'crc-change',payload:{reset:true,at:state.meta.updatedAt}})}catch(e){}refreshUI(false);toast('Sistema operacional zerado no aparelho e no Supabase.','ok',7000);
+  state.settings.lastSync=nowISO();syncBaseState=cloneCRC(state);persistLocalSnapshot();try{await supabaseChannel?.send({type:'broadcast',event:'crc-reset',payload:{resetEpoch:state.meta.resetEpoch,at:state.meta.updatedAt}})}catch(e){}refreshUI(false);toast('Sistema operacional zerado no aparelho e no Supabase.','ok',7000);
  }catch(e){persistLocalSnapshot();render();toast('Dados locais zerados, mas houve falha ao zerar o Supabase: '+e.message,'error',10000)}
 }
 function updateTimers(){
@@ -1984,15 +2038,16 @@ window.addEventListener('online',()=>{if(session&&document.visibilityState==='vi
 async function startCRC(){
  persistLocalSnapshot();
  if(session&&document.visibilityState==='visible'&&navigator.onLine)await startCloudSession({pull:true});
+ syncBaseState=cloneCRC(state);
  lastAppliedCloudFingerprint=cloudFingerprint(state);
  render();bindThemeButton();setTimeout(()=>$('#crcSplash')?.classList.add('hide'),450);
  timerLoop=setInterval(()=>{updateTimers();checkTimeAlerts()},1000);
  priorityLoop=setInterval(priorityReminder,15000);
  // Realtime é a fonte principal. A consulta abaixo é apenas uma segurança eventual.
- setInterval(()=>{if(cloudSessionAllowed()&&!syncInFlight&&!isReceivingOperationLocked()&&!localDirty&&Date.now()-lastLocalMutationAt>10000)pullCloud(false)},120000);
+ setInterval(()=>{if(cloudSessionAllowed()&&!syncInFlight&&!isReceivingOperationLocked()&&!localDirty&&Date.now()-lastLocalMutationAt>15000)pullCloud(false)},300000);
 }
 startCRC();
-// CRC V10.9: fluxo contínuo, Realtime com dupla via, pull ao retornar ao app e atualização manual.
+// CRC V11.5: Realtime Broadcast por delta global; snapshot completo apenas para persistência/recuperação.
 
 document.addEventListener('click',e=>{
  const logout=e.target.closest('#logoutBtn');
@@ -2006,8 +2061,8 @@ document.addEventListener('submit',e=>{
  setTimeout(()=>{if(f)f.dataset.submitting='0'},900);
 },true);
 
-window.addEventListener('focus',()=>{if(state?.settings?.supabaseEnabled&&!localDirty)scheduleCloudPull(180)});
-window.addEventListener('pageshow',()=>{if(state?.settings?.supabaseEnabled&&!localDirty)scheduleCloudPull(180)});
+// V11.5: sem GET extra em focus/pageshow. Realtime Broadcast mantém os aparelhos online;
+// visibilitychange/online e o botão ↻ fazem a recuperação quando necessário.
 </script>
 
 
