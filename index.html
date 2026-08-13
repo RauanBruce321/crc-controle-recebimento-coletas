@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.2 SHOW DE BOLA - AJUSTE FINAL</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.2 SHOW DE BOLA + VALIDAÇÃO LEVE</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -473,10 +473,6 @@ state=normalizeStateShape(state);
 const CRC_SYNC_ARRAYS=['users','typologies','plan','drivers','docks','patio','active','history','priorities','logs','turns'];
 let syncBaseState=null;
 let realtimeReady=false;
-let deltaValidationTimer=null;
-let deltaValidationInFlight=false;
-const deltaWatermark={};
-let lastRealtimeEventAt=Date.now();
 let baseCloudStamp='';
 let consistencyProbeInFlight=false;
 let lastConsistencyProbeAt=0;
@@ -862,23 +858,6 @@ function stats(){
 function waitingPriorities(){
  return state.priorities.filter(p=>p.status==='Aguardando').sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
 }
-function driverInCurrentAction(driver,{allowPatio=false,allowPriority=false}={}){
- if(!driver)return false;
- const plate=normalizeDriverPlate(driver.plate);
- const same=x=>x&&(x.driverId===driver.id||(plate&&normalizeDriverPlate(x.plate)===plate));
- if(state.active.some(same))return true;
- if(!allowPatio&&state.patio.some(same))return true;
- if(!allowPriority&&state.priorities.some(p=>p.status==='Aguardando'&&same(p)))return true;
- return false;
-}
-function enforceActiveDriverLock(){
- const activeDrivers=new Set((state.active||[]).map(a=>a.driverId).filter(Boolean));
- const activePlates=new Set((state.active||[]).map(a=>normalizeDriverPlate(a.plate)).filter(Boolean));
- const isActive=x=>activeDrivers.has(x?.driverId)||(x?.plate&&activePlates.has(normalizeDriverPlate(x.plate)));
- state.patio=(state.patio||[]).filter(x=>!isActive(x));
- state.priorities=(state.priorities||[]).filter(x=>!(x.status==='Aguardando'&&isActive(x)));
-}
-
 function priorityCards(){
  const queue=waitingPriorities();
  return queue.slice(0,3).map((p,i)=>{const waited=mins(Date.now()-new Date(p.createdAt));return `<div class="priority-card"><div class="priority-label">🚨 Prioridade ${i+1}</div><h4>${esc(p.driverName)}</h4><p><b>${esc(p.plate)}</b> • ${esc(p.typology)}</p><p><b>Previsto calculado:</b> ${Number(p.expectedVolumes||0).toLocaleString('pt-BR')} volumes</p><p>${esc(p.reason||'Sem motivo informado')}</p><p class="priority-time">${new Date(p.createdAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} • há ${waited} min</p></div>`}).join('');
@@ -1051,6 +1030,20 @@ function activeCards(showFinalize=true){
    return `<article class="vehicle-card ${a.priority?'priority':''}" data-active="${a.id}"><div class="vc-head"><span class="badge ${a.priority?'badge-red':'badge-blue'}">${a.priority?'🚨 PRIORIDADE':'DOCA '+esc(a.dock)}</span><span class="badge badge-purple">${esc(a.operation)}</span></div><div class="vc-body"><h4>${esc(a.driverName)}</h4><p>${esc(a.typology)} • ${esc(a.plate)} • Cavalo ${esc(a.horse)}</p><p><b>Previsto:</b> ${a.expectedVolumes.toLocaleString('pt-BR')} volumes • <b>HC:</b> ${Number(a.hc||1)}</p><div class="timer" data-start="${a.startedAt}">00:00:00</div><div class="progress ${cls}"><span style="width:${pct}%"></span></div><p>Meta: ${a.targetMin} min • Início: ${new Date(a.startedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p>${showFinalize&&can('admin','leader','receiving')?`<div class="card-actions"><button class="btn btn-danger finalize-btn" data-id="${a.id}">Finalizar</button><button class="btn btn-soft share-start-photo" data-id="${a.id}" title="Compartilhar início no WhatsApp" aria-label="Compartilhar início no WhatsApp"><svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M16 3a13 13 0 0 0-11.1 19.8L3 29l6.4-1.7A13 13 0 1 0 16 3Zm0 23.6c-2 0-3.9-.5-5.6-1.5l-.4-.2-3.8 1 1-3.7-.3-.4A10.6 10.6 0 1 1 16 26.6Zm5.8-7.9c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.2-.2.2-.3.2-.7.1-1.8-.9-3-1.6-4.2-3.6-.3-.5.3-.5.9-1.6.1-.2.1-.4 0-.6-.1-.2-.7-1.7-1-2.3-.3-.7-.6-.6-.8-.6h-.7c-.2 0-.6.1-.9.4-.3.3-1.2 1.2-1.2 2.9s1.2 3.3 1.4 3.6c.2.2 2.4 3.7 5.9 5.2.8.4 1.5.6 2 .7.8.3 1.6.2 2.2.1.7-.1 1.9-.8 2.2-1.5.3-.7.3-1.4.2-1.5-.1-.1-.3-.2-.6-.3Z"/></svg></button></div>`:''}</div></article>`
  }).join(''):`<div class="small">Nenhum veículo em descarregamento agora.</div>`}</div></div>`;
 }
+function driverMatchesAction(driver,item){
+ if(!driver||!item)return false;
+ const dp=normalizeDriverPlate(driver.plate);
+ return item.driverId===driver.id || (!!dp&&normalizeDriverPlate(item.plate)===dp);
+}
+function driverActionState(driver){
+ if(!driver)return null;
+ if((state.active||[]).some(x=>driverMatchesAction(driver,x)))return 'descarregamento';
+ if((state.patio||[]).some(x=>driverMatchesAction(driver,x)))return 'pátio';
+ if((state.priorities||[]).some(x=>x.status==='Aguardando'&&driverMatchesAction(driver,x)))return 'prioridade';
+ return null;
+}
+function driverAvailableForNewAction(driver){return !driverActionState(driver)}
+
 function renderPatio(){
  const today=localDateKey();
  const rows=state.patio.slice().sort((a,b)=>new Date(a.arrivedAt)-new Date(b.arrivedAt));
@@ -1058,7 +1051,7 @@ function renderPatio(){
  `<div class="panel"><form id="patioForm"><div class="form-grid">
  <div class="span2"><label>MOTORISTA</label>
 <input id="patioDriverSearch" type="search" placeholder="Pesquisar nome do motorista ou placa..." autocomplete="off">
-<select id="patioDriverSelect"><option value="">Selecione...</option>${state.drivers.filter(d=>d.status==='Ativo'&&!driverInCurrentAction(d)).sort((a,b)=>a.name.localeCompare(b.name)).map(d=>`<option value="${d.id}" data-search="${esc((d.name+' '+d.plate).toLowerCase())}">${esc(d.name)} • ${esc(d.plate)}</option>`).join('')}</select></div>
+<select id="patioDriverSelect"><option value="">Selecione...</option>${state.drivers.filter(d=>d.status==='Ativo'&&driverAvailableForNewAction(d)).sort((a,b)=>a.name.localeCompare(b.name)).map(d=>`<option value="${d.id}" data-search="${esc((d.name+' '+d.plate).toLowerCase())}">${esc(d.name)} • ${esc(d.plate)}</option>`).join('')}</select></div>
  <div><label>Motorista</label><input id="patioName" required></div>
  <div><label>Placa</label><input id="patioPlate" required></div>
  <div><label>Cavalo</label><input id="patioHorse" value="S/N"></div>
@@ -1074,8 +1067,7 @@ function addPatioVehicle(e){
  const name=normalizeDriverName($('#patioName').value),plate=normalizeDriverPlate($('#patioPlate').value),horse=normalizeDriverPlate($('#patioHorse').value)||'S/N',typology=$('#patioTyp').value;
  if(!name||!plate||!typology)return toast('Informe motorista, placa e tipologia.','error');
  if(state.patio.some(x=>normalizeDriverPlate(x.plate)===plate))return toast('Este veículo já está no pátio.','error');
- let driver=state.drivers.find(x=>normalizeDriverPlate(x.plate)===plate);
- if(driver&&driverInCurrentAction(driver))return toast('Este motorista/veículo já está em uma ação e não pode ser lançado novamente.','error');
+ let driver=state.drivers.find(x=>normalizeDriverPlate(x.plate)===plate);if(driver){const busy=driverActionState(driver);if(busy)return toast(`Este motorista já está em ${busy}. Finalize/retire essa ação antes de lançar outra.`,'error');}
  if(driver)Object.assign(driver,{name,horse,typology,status:'Ativo',updatedAt:nowISO()});
  else{driver={id:uid(),name,plate,horse,typology,status:'Ativo',createdAt:nowISO(),updatedAt:nowISO()};state.drivers.push(driver)}
  state.patio.push({id:uid(),driverId:driver.id,driverName:name,plate,horse,typology,arrivedAt:nowISO(),createdAt:nowISO(),updatedAt:nowISO()});
@@ -1085,7 +1077,7 @@ function renderReceiving(){
  return pageHead('Recebimento Operacional','Selecione o motorista, confirme a doca, registre a foto e inicie a descarga.')+
  `<div class="receiving-priority-strip"><div class="cards"><div class="kpi priority-kpi"><small>Prioridades</small><strong>${waitingPriorities().length}</strong><em>aguardando</em></div>${priorityCards()}</div></div><div class="panel"><div class="panel-title"><h3>Iniciar descarregamento</h3><span class="small">A doca fica bloqueada até a finalização</span></div>
  <form id="startForm"><div class="receiving-form-grid">
- <div class="span2"><label>Motorista</label><input id="driverSearch" type="search" placeholder="Pesquisar nome do motorista..." autocomplete="off"><select id="driverSelect" required style="margin-top:8px"><option value="">Selecione...</option>${state.drivers.filter(d=>d.status==='Ativo'&&!driverInCurrentAction(d,{allowPatio:true,allowPriority:true})).sort((a,b)=>{const ap=state.patio.some(p=>p.driverId===a.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(a.plate)),bp=state.patio.some(p=>p.driverId===b.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(b.plate));const apr=waitingPriorities().some(p=>p.driverId===a.id),bpr=waitingPriorities().some(p=>p.driverId===b.id);return Number(bp)-Number(ap)||Number(bpr)-Number(apr)||a.name.localeCompare(b.name)}).map(d=>{const pr=waitingPriorities().find(p=>p.driverId===d.id);const inPatio=state.patio.some(p=>p.driverId===d.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(d.plate));return `<option value="${d.id}" data-search="${esc((d.name+' '+d.plate+' '+d.typology+' '+(inPatio?'patio':'')).toLowerCase())}">${inPatio?'🅿️ PÁTIO — ':''}${pr?'🚨 PRIORIDADE — ':''}${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`}).join('')}</select></div>
+ <div class="span2"><label>Motorista</label><input id="driverSearch" type="search" placeholder="Pesquisar nome do motorista..." autocomplete="off"><select id="driverSelect" required style="margin-top:8px"><option value="">Selecione...</option>${state.drivers.filter(d=>d.status==='Ativo'&&!state.active.some(a=>a.driverId===d.id)).sort((a,b)=>{const ap=state.patio.some(p=>p.driverId===a.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(a.plate)),bp=state.patio.some(p=>p.driverId===b.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(b.plate));const apr=waitingPriorities().some(p=>p.driverId===a.id),bpr=waitingPriorities().some(p=>p.driverId===b.id);return Number(bp)-Number(ap)||Number(bpr)-Number(apr)||a.name.localeCompare(b.name)}).map(d=>{const pr=waitingPriorities().find(p=>p.driverId===d.id);const inPatio=state.patio.some(p=>p.driverId===d.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(d.plate));return `<option value="${d.id}" data-search="${esc((d.name+' '+d.plate+' '+d.typology+' '+(inPatio?'patio':'')).toLowerCase())}">${inPatio?'🅿️ PÁTIO — ':''}${pr?'🚨 PRIORIDADE — ':''}${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`}).join('')}</select></div>
  <div><label>Placa</label><input id="driverPlateView" placeholder="Automático — pode corrigir"></div>
  <div><label>Cavalo</label><input id="driverHorseView" placeholder="Automático — pode corrigir"></div>
  <div><label>Tipologia</label><input id="driverTypView" placeholder="Automático — pode corrigir"></div>
@@ -1118,7 +1110,7 @@ function renderPlanning(){
  <div class="panel"><div class="panel-title"><h3>Previsão lançada</h3><span class="small">Somente a previsão operacional do dia</span></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipologia</th><th>Veículos</th><th>Volumes</th><th>Peso</th><th>Média por carro</th><th>Ação</th></tr></thead><tbody>${state.plan.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.typology)}</td><td>${p.vehicles}</td><td>${p.volumes.toLocaleString('pt-BR')}</td><td>${Number(p.weight).toLocaleString('pt-BR')}</td><td>${Math.round(p.volumes/p.vehicles)}</td><td><button class="btn btn-danger delete-plan" data-id="${p.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>`+noShowPanel();
 }
 function renderPriorities(){
- const available=state.drivers.filter(d=>d.status==='Ativo'&&!driverInCurrentAction(d)).sort((a,b)=>a.name.localeCompare(b.name));
+ const available=state.drivers.filter(d=>d.status==='Ativo'&&driverAvailableForNewAction(d)).sort((a,b)=>a.name.localeCompare(b.name));
  return pageHead('Prioridades','Veículos prioritários.')+
  `<div class="panel"><form id="priorityForm"><div class="form-grid"><div class="full"><label>Motorista cadastrado</label><input id="prioDriverSearch" type="search" placeholder="Pesquisar nome do motorista ou placa..." autocomplete="off"><select id="prioDriver" required style="margin-top:8px"><option value="">Selecione...</option>${available.map(d=>`<option value="${d.id}" data-search="${esc((d.name+' '+d.plate+' '+d.typology).toLowerCase())}">${esc(d.name)} • ${esc(d.plate)} • ${esc(d.typology)}</option>`).join('')}</select><p class="small">A prioridade pode ser lançada para qualquer motorista cadastrado, mesmo que ainda não esteja no pátio.</p></div><div><label>Placa</label><input id="prioPlate" class="readonly-field" readonly></div><div><label>Cavalo</label><input id="prioHorse" class="readonly-field" readonly></div><div><label>Tipologia</label><input id="prioTyp" class="readonly-field" readonly></div><div><label>Quantidade prevista calculada</label><input id="prioExpectedVolumes" type="number" min="0" readonly class="readonly-field"></div><div><label>Motivo (opcional)</label><input id="prioReason"></div><div class="full"><button class="btn btn-danger">Cadastrar prioridade</button></div></div></form></div>
  <div class="panel"><div class="table-wrap"><table><thead><tr><th>Motorista</th><th>Placa</th><th>Tipologia</th><th>Motivo</th><th>Status</th><th>Cadastro</th><th>Ação</th></tr></thead><tbody>${state.priorities.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(p=>`<tr><td>${esc(p.driverName)}</td><td>${esc(p.plate)}</td><td>${esc(p.typology)}</td><td>${esc(p.reason||'—')}</td><td><span class="badge ${p.status==='Aguardando'?'badge-red':'badge-green'}">${p.status}</span></td><td>${brDate(p.createdAt)}</td><td>${p.status==='Aguardando'?`<button class="btn btn-soft cancel-priority" data-id="${p.id}">Cancelar</button>`:'—'}</td></tr>`).join('')}</tbody></table></div></div>`;
@@ -1698,7 +1690,7 @@ async function closeOperationalDay(){
 let addingPlan=false;
 function addPlan(e){e.preventDefault();if(addingPlan)return;const btn=e.currentTarget?.querySelector('button[type="submit"]');const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');addingPlan=true;if(btn)btn.disabled=true;try{const duplicate=state.plan.some(x=>x.date===date&&x.typology===typology&&Number(x.vehicles)===vehicles&&Number(x.volumes)===volumes&&Number(x.weight||0)===weight&&(Date.now()-new Date(x.createdAt||0).getTime())<5000);if(duplicate)return toast('Este lançamento já foi registrado.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(false);e.currentTarget.reset();$('#planDate').value=new Date().toISOString().slice(0,10);render();if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),120)}toast('Programação cadastrada.','ok')}finally{addingPlan=false;if(btn&&document.body.contains(btn))btn.disabled=false}}
 
-function addPriority(e){e.preventDefault();const driver=state.drivers.find(d=>d.id===$('#prioDriver').value&&d.status==='Ativo');if(!driver)return toast('Motorista não cadastrado ou inativo. Cadastre o motorista no Recebimento ou no Pátio.','error');if(driverInCurrentAction(driver))return toast('Este motorista/veículo já está em uma ação e não pode receber outra ação agora.','error');if(state.priorities.some(p=>p.status==='Aguardando'&&p.driverId===driver.id))return toast('Este motorista já está na fila de prioridade.','error');const createdAt=nowISO(),p={id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()};state.priorities.push(p);log('Cadastrou prioridade',`${p.driverName} • ${p.plate} • ${p.typology}`,false);save(true);toast(`${p.driverName} • ${p.plate} • ${p.typology}`,'priority',8000);render()}
+function addPriority(e){e.preventDefault();const driver=state.drivers.find(d=>d.id===$('#prioDriver').value&&d.status==='Ativo');if(!driver)return toast('Motorista não cadastrado ou inativo. Cadastre o motorista no Recebimento ou no Pátio.','error');const busy=driverActionState(driver);if(busy)return toast(`Este motorista já está em ${busy}. Finalize/retire essa ação antes de lançar outra.`,'error');if(state.priorities.some(p=>p.status==='Aguardando'&&p.driverId===driver.id))return toast('Este motorista já está na fila de prioridade.','error');const createdAt=nowISO(),p={id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()};state.priorities.push(p);log('Cadastrou prioridade',`${p.driverName} • ${p.plate} • ${p.typology}`,false);save(true);toast(`${p.driverName} • ${p.plate} • ${p.typology}`,'priority',8000);render()}
 function filterHistory(){const q=$('#historySearch').value.toLowerCase(),op=$('#historyOperation').value;$$('#historyTable tbody tr').forEach(tr=>tr.style.display=(!q||tr.innerText.toLowerCase().includes(q))&&(!op||tr.innerText.includes(op))?'':'none')}
 function exportExcel(){
  const audit=auditFileName();
@@ -1869,15 +1861,14 @@ function initSupabase(){
 }
 function cloudSessionAllowed(){return !!session&&document.visibilityState==='visible'&&navigator.onLine;}
 function stopCloudSession(){
- clearTimeout(cloudPullTimer);
- stopDeltaValidation();
+ clearTimeout(cloudPullTimer);stopCloudValidation();
  try{if(supabaseChannel&&supabaseClient)supabaseClient.removeChannel(supabaseChannel)}catch(e){}
  supabaseChannel=null;
  realtimeReady=false;
 }
 async function startCloudSession({pull=true}={}){
  if(!cloudSessionAllowed())return false;
- initSupabase();initRealtime();startDeltaValidation();
+ initSupabase();initRealtime();startCloudValidation();
  if(pull)return await pullCloud(true);
  return true;
 }
@@ -2077,17 +2068,43 @@ function applyNormalizedRealtime(kind,payload){
   }else arr.push(item);
  }
  state[kind]=arr;
- if(payload.table&&row?.ultima_alteracao){
-  const t=String(row.ultima_alteracao);
-  if(!deltaWatermark[payload.table]||t>deltaWatermark[payload.table])deltaWatermark[payload.table]=t;
- }
- lastRealtimeEventAt=Date.now();
- enforceActiveDriverLock();
  enforceDefaultAccessAndDedupe();
  persistLocalSnapshot();
  if(!syncInFlight)syncBaseState=cloneCRC(state);
- if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(10);
+ if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(30);
 }
+const CRC_VALIDATION_INTERVAL_MS=15000;
+let crcValidationTimer=null,crcValidationRunning=false;
+const crcValidationSeen={};
+function noteValidationStamp(table,stamp){
+ const t=Date.parse(stamp||0)||0;
+ if(table&&t>Number(crcValidationSeen[table]||0))crcValidationSeen[table]=t;
+}
+async function validateCloudFreshness(){
+ if(crcValidationRunning||syncInFlight||!cloudSessionAllowed())return false;
+ initSupabase();if(!supabaseClient)return false;
+ crcValidationRunning=true;
+ try{
+  let changed=false;
+  for(const table of [...new Set(Object.values(CRC_NORMALIZED_TABLES))]){
+   const {data,error}=await supabaseClient.from(table).select('ultima_alteracao').order('ultima_alteracao',{ascending:false}).limit(1);
+   if(error)throw error;
+   const remote=Date.parse(data?.[0]?.ultima_alteracao||0)||0;
+   const seen=Number(crcValidationSeen[table]||0);
+   if(remote>seen){if(seen>0)changed=true;crcValidationSeen[table]=remote}
+  }
+  if(changed)return await pullCloud(true);
+  return true;
+ }catch(e){console.warn('CRC: validação leve falhou.',e);return false}
+ finally{crcValidationRunning=false}
+}
+function startCloudValidation(){
+ clearInterval(crcValidationTimer);
+ if(!session)return;
+ crcValidationTimer=setInterval(()=>{if(document.visibilityState==='visible'&&navigator.onLine)validateCloudFreshness()},CRC_VALIDATION_INTERVAL_MS);
+}
+function stopCloudValidation(){clearInterval(crcValidationTimer);crcValidationTimer=null}
+
 function initRealtime(){
  if(!cloudSessionAllowed())return;
  initSupabase();if(!supabaseClient||supabaseChannel)return;
@@ -2097,7 +2114,9 @@ function initRealtime(){
  uniqueTables.forEach(table=>{
   ch=ch.on('postgres_changes',{event:'*',schema:'public',table},payload=>{
    try{
-    const kind=table==='crc_veiculos'?kindFromVehicleRow(payload.eventType==='DELETE'?payload.old:payload.new):normalizedKindFromTable(table);
+    const realtimeRow=payload.eventType==='DELETE'?payload.old:payload.new;
+     noteValidationStamp(table,realtimeRow?.ultima_alteracao);
+     const kind=table==='crc_veiculos'?kindFromVehicleRow(realtimeRow):normalizedKindFromTable(table);
     applyNormalizedRealtime(kind,{...payload,table});
    }catch(e){console.warn('CRC: falha Realtime em '+table,e)}
   });
@@ -2125,10 +2144,7 @@ async function pullCloud(force=false){
    const {data,error}=await supabaseClient.from(table).select('*');
    if(error)throw error;
    tableRows[table]=data||[];
-  }
-  for(const [table,rows] of Object.entries(tableRows)){
-   const latest=(rows||[]).map(r=>r?.ultima_alteracao).filter(Boolean).sort().pop();
-   if(latest)deltaWatermark[table]=String(latest);
+   const newest=(data||[]).reduce((m,r)=>Math.max(m,Date.parse(r?.ultima_alteracao||0)||0),0);if(newest)crcValidationSeen[table]=newest;
   }
   for(const [kind,table] of Object.entries(CRC_NORMALIZED_TABLES)){
    let rows=tableRows[table]||[];
@@ -2152,7 +2168,6 @@ async function pullCloud(force=false){
   next.settings={...next.settings,...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
   next.version='13.2';
   state=normalizeStateShape(next);
-  enforceActiveDriverLock();
   enforceDefaultAccessAndDedupe();
   persistLocalSnapshot();
   syncBaseState=cloneCRC(state);
@@ -2165,42 +2180,6 @@ async function pullCloud(force=false){
   return false;
  }
 }
-
-
-async function validateRecentCloudChanges(){
- if(deltaValidationInFlight||syncInFlight||!cloudSessionAllowed()||document.visibilityState!=='visible'||!navigator.onLine)return false;
- // O Realtime continua sendo principal. Esta validação só procura registros ALTERADOS desde a última confirmação.
- deltaValidationInFlight=true;
- try{
-  initSupabase();if(!supabaseClient)return false;
-  const tables=[...new Set(Object.values(CRC_NORMALIZED_TABLES))];
-  let changed=false;
-  for(const table of tables){
-   const mark=deltaWatermark[table];
-   if(!mark)continue;
-   const {data,error}=await supabaseClient.from(table).select('*').gt('ultima_alteracao',mark).order('ultima_alteracao',{ascending:true}).limit(100);
-   if(error)throw error;
-   for(const row of (data||[])){
-    const kind=table==='crc_veiculos'?kindFromVehicleRow(row):normalizedKindFromTable(table);
-    applyNormalizedRealtime(kind,{eventType:'UPDATE',new:row,old:null,table});
-    changed=true;
-   }
-  }
-  if(changed&&session&&!isReceivingOperationLocked())scheduleVisualRefresh(10);
-  return true;
- }catch(e){
-  console.warn('CRC: validação leve de atualização falhou.',e);
-  return false;
- }finally{deltaValidationInFlight=false}
-}
-function startDeltaValidation(){
- clearInterval(deltaValidationTimer);
- // A cada 30 s, somente enquanto a tela está aberta/ativa. Não baixa o banco inteiro: pede apenas linhas alteradas após o último timestamp conhecido.
- deltaValidationTimer=setInterval(()=>{
-  if(session&&document.visibilityState==='visible'&&navigator.onLine)validateRecentCloudChanges();
- },30000);
-}
-function stopDeltaValidation(){clearInterval(deltaValidationTimer);deltaValidationTimer=null;}
 
 async function syncCloud(silent=false){
  if(!cloudSessionAllowed()){syncQueued=true;return false}
@@ -2332,7 +2311,7 @@ async function startCRC(){
  // Realtime é a fonte principal. A consulta abaixo é apenas uma segurança eventual.
 }
 startCRC();
-// CRC V13.2 Ajuste Final: Realtime principal + validação leve de deltas a cada 30s enquanto ativo. Motorista em ação fica bloqueado nas demais filas.
+// CRC V13.2 Show de Bola: Realtime original preservado + validação leve a cada 15s; pull completo somente quando detectar mudança perdida.
 
 document.addEventListener('click',e=>{
  const logout=e.target.closest('#logoutBtn');
@@ -2346,7 +2325,7 @@ document.addEventListener('submit',e=>{
  setTimeout(()=>{if(f)f.dataset.submitting='0'},900);
 },true);
 
-// V13.2 Ajuste Final: Realtime PostgreSQL principal; validação leve consulta somente alterações recentes, sem baixar o banco inteiro.
+// V13.2: sem polling. Realtime PostgreSQL mantém os aparelhos online; ao voltar do segundo plano ou tocar ↻, faz uma carga oficial única.
 </script>
 
 
