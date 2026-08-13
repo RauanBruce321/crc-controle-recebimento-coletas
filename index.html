@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V11.3 OTIMIZADO SUPABASE</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V11.4 SINCRONIA CONSISTENTE</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -380,7 +380,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:14},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'11.3',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'11.4',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -446,6 +446,9 @@ function normalizeStateShape(target){
  target.meta.deletedDrivers=Array.isArray(target.meta.deletedDrivers)?target.meta.deletedDrivers:[];
  target.meta.deletedDocks=Array.isArray(target.meta.deletedDocks)?target.meta.deletedDocks:[];
  target.meta.deletedPlans=Array.isArray(target.meta.deletedPlans)?target.meta.deletedPlans:[];
+ target.meta.completedVehicleIds=Array.isArray(target.meta.completedVehicleIds)?target.meta.completedVehicleIds:[];
+ target.meta.removedPatioIds=Array.isArray(target.meta.removedPatioIds)?target.meta.removedPatioIds:[];
+ target.meta.resolvedPriorityIds=Array.isArray(target.meta.resolvedPriorityIds)?target.meta.resolvedPriorityIds:[];
  const deletedDrivers=new Set(target.meta.deletedDrivers);
  const deletedDocks=new Set(target.meta.deletedDocks);
  const deletedPlans=new Set(target.meta.deletedPlans);
@@ -457,14 +460,8 @@ function normalizeStateShape(target){
 }
 state=normalizeStateShape(state);
 function keepOnlyCurrentOperationalDay(target){
- const today=localDateKey();
- target.plan=(target.plan||[]).filter(x=>localDateKey(x.date||x.createdAt)===today);
- target.history=(target.history||[]).filter(x=>localDateKey(x.finishedAt||x.updatedAt||x.createdAt)===today);
- target.active=(target.active||[]).filter(x=>localDateKey(x.startedAt||x.updatedAt||x.createdAt)===today);
- target.patio=(target.patio||[]).filter(x=>localDateKey(x.arrivedAt||x.updatedAt||x.createdAt)===today);
- target.priorities=(target.priorities||[]).filter(x=>localDateKey(x.createdAt||x.updatedAt)===today);
- target.logs=(target.logs||[]).filter(x=>localDateKey(x.at||x.createdAt||x.updatedAt)===today);
- target.turns=[];
+ // V11.4: o ciclo operacional NÃO é mais apagado na virada do dia.
+ // Os dados permanecem até a Torre usar "Finalizar ciclo, baixar e zerar".
  return target;
 }
 state=keepOnlyCurrentOperationalDay(state);
@@ -527,7 +524,7 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='11.3';
+ state.version='11.4';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
@@ -1056,7 +1053,13 @@ async function startReceiving(e){
   startingReceiving=true;if(submit){submit.disabled=true;submit.textContent='Iniciando...';}
   const balance=planBalance(driver.typology),target=state.typologies.find(t=>t.name===driver.typology)?.targetMin||30;
   const pr=state.priorities.find(p=>p.status==='Aguardando'&&(p.driverId===driver.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate)));
-  if(pr) state.priorities=state.priorities.filter(p=>p.id!==pr.id);
+  state.meta=state.meta||{};
+  if(pr){
+    state.meta.resolvedPriorityIds=[...new Set([...(state.meta.resolvedPriorityIds||[]),pr.id])];
+    state.priorities=state.priorities.filter(p=>p.id!==pr.id);
+  }
+  const patioConsumed=state.patio.filter(p=>p.driverId===driver.id||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate));
+  if(patioConsumed.length)state.meta.removedPatioIds=[...new Set([...(state.meta.removedPatioIds||[]),...patioConsumed.map(p=>p.id)])];
   const activeId=uid();
   state.active.push({id:activeId,driverId:driver.id,driverName:driver.name,plate:driver.plate,horse:driver.horse,typology:driver.typology,dock,operation:session.operation,expectedVolumes:balance.expected,targetMin:target,startedAt:nowISO(),startPhoto:photo,priority:!!pr,priorityId:pr?.id||null,priorityReason:pr?.reason||'',updatedAt:nowISO(),operator:session.name,hc,alert50:false,alert80:false,alert100:false,lastOvertimeAlert:0});
   state.patio=state.patio.filter(p=>p.driverId!==driver.id&&normalizeDriverPlate(p.plate)!==normalizeDriverPlate(driver.plate));
@@ -1245,6 +1248,8 @@ async function finishReceiving(e,id){
   };
 
   state.history.unshift(historyRecord);
+  state.meta=state.meta||{};
+  state.meta.completedVehicleIds=[...new Set([...(state.meta.completedVehicleIds||[]),id])];
 
   state.active=state.active.filter(x=>x.id!==id);
 
@@ -1502,7 +1507,7 @@ async function closeOperationalDay(){
  stopCloudSession();clearTimeout(syncTimer);syncQueued=false;syncInFlight=false;
  const resetEpoch=Date.now(),stamp=nowISO();
  const keep={users:state.users.filter(u=>['tower','receiving','patio'].includes(u.role)),drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||stamp,updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch,lastEvent:null}};
- state={version:'11.3',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
+ state={version:'11.4',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
  enforceDefaultAccessAndDedupe();localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();lastAppliedCloudFingerprint=cloudFingerprint(state);
  try{
    initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
@@ -1601,64 +1606,85 @@ function mergeStates(local,remote){
 
  const lt=stateStamp(local),rt=stateStamp(remote);
  const localReset=Number(local.meta?.resetEpoch||0),remoteReset=Number(remote.meta?.resetEpoch||0);
+ // Reset da Torre é soberano. Uma cópia anterior nunca pode repovoar um ciclo já zerado.
  if(remoteReset>localReset){
    const clean=normalizeStateShape(JSON.parse(JSON.stringify(remote)));
    clean.settings={...(remote.settings||{}),...(local.settings||{})};
-   return keepOnlyCurrentOperationalDay(clean);
+   return clean;
  }
  if(localReset>remoteReset){
    const clean=normalizeStateShape(JSON.parse(JSON.stringify(local)));
    clean.settings={...(remote.settings||{}),...(local.settings||{})};
-   return keepOnlyCurrentOperationalDay(clean);
+   return clean;
  }
- const base=rt>lt?remote:local;
 
+ const base=rt>lt?remote:local;
  const merged={
   ...base,
   settings:{...(remote.settings||{}),...(local.settings||{})},
   meta:{...(base.meta||{})}
  };
 
- // Entidades que podem ser mescladas normalmente
- ['users','drivers','docks','patio','priorities','turns','logs']
- .forEach(k=>{
+ // Tombstones operacionais: impedem estados antigos de ressuscitarem itens já movimentados.
+ const completedVehicleIds=new Set([...(local.meta?.completedVehicleIds||[]),...(remote.meta?.completedVehicleIds||[])]);
+ const removedPatioIds=new Set([...(local.meta?.removedPatioIds||[]),...(remote.meta?.removedPatioIds||[])]);
+ const resolvedPriorityIds=new Set([...(local.meta?.resolvedPriorityIds||[]),...(remote.meta?.resolvedPriorityIds||[])]);
+ merged.meta.completedVehicleIds=[...completedVehicleIds];
+ merged.meta.removedPatioIds=[...removedPatioIds];
+ merged.meta.resolvedPriorityIds=[...resolvedPriorityIds];
+
+ ['users','drivers','docks','turns','logs'].forEach(k=>{
   merged[k]=mergeEntityArrays(local[k],remote[k],lt,rt);
  });
 
- // Exclusões explícitas são tombstones: uma cópia antiga de outro aparelho não pode ressuscitar a previsão.
+ // Pátio e prioridades também são unidos, porém respeitando os tombstones.
+ merged.patio=mergeEntityArrays(local.patio,remote.patio,lt,rt).filter(p=>!removedPatioIds.has(p.id));
+ merged.priorities=mergeEntityArrays(local.priorities,remote.priorities,lt,rt).filter(p=>!resolvedPriorityIds.has(p.id));
+
+ // Exclusões explícitas de programação continuam soberanas.
  const deletedPlans=new Set([...(local.meta?.deletedPlans||[]),...(remote.meta?.deletedPlans||[])]);
  merged.meta.deletedPlans=[...deletedPlans];
-
- // Programação da Torre: união por ID evita que um lançamento recém-feito
- // desapareça quando outro aparelho recebe/manda uma versão quase simultânea.
  merged.plan=mergeEntityArrays(local.plan,remote.plan,lt,rt).filter(x=>!deletedPlans.has(x.id));
 
- // Histórico
- // Nunca faz merge para evitar reaparecimento de recebimentos antigos.
- merged.history = JSON.parse(JSON.stringify(
-  rt>lt ? (remote.history||[]) : (local.history||[])
- ));
+ // Histórico é união por ID. Uma finalização feita em um aparelho não desaparece
+ // porque outro aparelho estava com uma fotografia anterior do CRC.
+ merged.history=mergeEntityArrays(local.history,remote.history,lt,rt);
 
- // Tipologias permanecem com merge
  merged.typologies=mergeEntityArrays(
   (local.typologies||[]).map(x=>({id:x.id||x.name,...x})),
   (remote.typologies||[]).map(x=>({id:x.id||x.name,...x})),
-  lt,
-  rt
+  lt,rt
  ).map(({id,...x})=>x);
+
  merged.active=mergeEntityArrays(local.active,remote.active,lt,rt);
+
+ // Tudo que já entrou no histórico/arquivo é definitivamente concluído nesse ciclo.
+ const archivedIds=new Set((merged.turns||[]).flatMap(t=>(t.records||[]).map(r=>r.id)));
+ (merged.history||[]).forEach(h=>completedVehicleIds.add(h.id));
+ archivedIds.forEach(id=>completedVehicleIds.add(id));
+ merged.meta.completedVehicleIds=[...completedVehicleIds];
+ merged.active=merged.active.filter(a=>!completedVehicleIds.has(a.id));
+ merged.history=merged.history.filter(h=>!archivedIds.has(h.id));
+
+ // Um registro de pátio consumido ou um veículo atualmente em descarga não pode voltar ao pátio.
  const activeDriverIds=new Set(merged.active.map(a=>a.driverId).filter(Boolean));
  const activePlates=new Set(merged.active.map(a=>normalizeDriverPlate(a.plate)).filter(Boolean));
- merged.patio=(merged.patio||[]).filter(p=>!activeDriverIds.has(p.driverId)&&!activePlates.has(normalizeDriverPlate(p.plate)));
- merged.priorities=(merged.priorities||[]).filter(p=>!(p.status==='Aguardando'&&(activeDriverIds.has(p.driverId)||activePlates.has(normalizeDriverPlate(p.plate)))));
- const archivedIds=new Set(merged.turns.flatMap(t=>(t.records||[]).map(r=>r.id)));
- const completedIds=new Set([...merged.history.map(h=>h.id),...archivedIds]);
- merged.active=merged.active.filter(a=>!completedIds.has(a.id));
- merged.history=merged.history.filter(h=>!archivedIds.has(h.id));
+ merged.patio=(merged.patio||[]).filter(p=>
+   !removedPatioIds.has(p.id) &&
+   !activeDriverIds.has(p.driverId) &&
+   !activePlates.has(normalizeDriverPlate(p.plate))
+ );
+ merged.priorities=(merged.priorities||[]).filter(p=>
+   !resolvedPriorityIds.has(p.id) &&
+   !(p.status==='Aguardando'&&(activeDriverIds.has(p.driverId)||activePlates.has(normalizeDriverPlate(p.plate))))
+ );
+
  const occupied=new Set(merged.active.map(a=>a.dock));
  merged.docks=uniqueDocks(merged.docks).map(d=>({...d,status:occupied.has(d.number)?'Ocupada':(d.status==='Ocupada'?'Livre':d.status)}));
- merged.version='11.3';merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
- return keepOnlyCurrentOperationalDay(normalizeStateShape(merged));
+ merged.version='11.4';
+ merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();
+ merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
+ return normalizeStateShape(merged);
 }
 function initSupabase(){
  try{
@@ -1707,8 +1733,14 @@ function initRealtime(){
  if(!cloudSessionAllowed())return;
  initSupabase();if(!supabaseClient||supabaseChannel)return;
  supabaseChannel=supabaseClient
-  .channel('crc-live-v113',{config:{broadcast:{self:false}}})
-  .on('postgres_changes',{event:'*',schema:'public',table:SUPABASE_TABLE,filter:`id=eq.${SUPABASE_ROW_ID}`},()=>scheduleCloudPull(15))
+  .channel('crc-live-v114',{config:{broadcast:{self:false}}})
+  .on('postgres_changes',{event:'*',schema:'public',table:SUPABASE_TABLE,filter:`id=eq.${SUPABASE_ROW_ID}`},payload=>{
+    // O próprio evento já traz o JSON novo: aplica imediatamente, sem esperar outro GET.
+    const incoming=payload?.new?.dados;
+    if(incoming&&typeof incoming==='object'){
+      try{applyIncomingState(incoming,false)}catch(e){console.warn('CRC: falha ao aplicar evento Realtime.',e);scheduleCloudPull(180)}
+    }else scheduleCloudPull(180);
+  })
   .subscribe(status=>{
     if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
       try{supabaseClient.removeChannel(supabaseChannel)}catch(e){}
@@ -1816,7 +1848,7 @@ async function syncCloud(silent=false){
 
   const sentStamp=payload.meta?.updatedAt||nowISO();
 
-  payload.version='11.3';
+  payload.version='11.4';
 
   payload.settings={
    ...(payload.settings||{}),
@@ -1896,7 +1928,7 @@ async function clearAll(){
  if(!confirm('ZERAR TUDO que foi lançado? Serão apagados previsões, prioridades, recebimentos, veículos ativos e histórico. Usuários, motoristas, docas, tipologias e configurações serão mantidos. Somente os dados operacionais serão apagados.'))return;
  if(!confirm('Confirma a limpeza total dos dados operacionais? Esta ação não pode ser desfeita.'))return;
  const keep={users:state.users,drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||nowISO(),updatedAt:nowISO(),revision:Number(state.meta?.revision||0)+1}};
- state={version:'11.3',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
+ state={version:'11.4',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
  enforceDefaultAccessAndDedupe();
  localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();
  try{
@@ -1966,13 +1998,6 @@ document.addEventListener('click',e=>{
  const logout=e.target.closest('#logoutBtn');
  if(logout){e.preventDefault();e.stopPropagation();logoutNow('Saiu do sistema');}
 });
-document.addEventListener('visibilitychange',()=>{
- if(document.visibilityState==='visible'&&session&&navigator.onLine){
-   startCloudSession({pull:true});
- }
-});
-window.addEventListener('online',()=>{if(session)startCloudSession({pull:true})});
-
 document.addEventListener('submit',e=>{
  const f=e.target;
  if(!f||!['planForm','patioForm','priorityForm'].includes(f.id))return;
