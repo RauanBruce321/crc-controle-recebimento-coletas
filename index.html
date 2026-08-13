@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V11.5 REALTIME POR EVENTOS</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V11.6 SINCRONIA DIRETA GLOBAL</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -380,7 +380,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:14},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'11.5',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'11.6',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -460,12 +460,15 @@ function normalizeStateShape(target){
 }
 state=normalizeStateShape(state);
 
-/* CRC V11.5 — sincronização global por eventos/deltas.
+/* CRC V11.6 — sincronização global por eventos/deltas.
    O estado completo continua persistido no Supabase para recuperação,
    mas os aparelhos online recebem pelo Realtime Broadcast somente o que mudou. */
 const CRC_SYNC_ARRAYS=['users','typologies','plan','drivers','docks','patio','active','history','priorities','logs','turns'];
 let syncBaseState=null;
 let realtimeReady=false;
+let baseCloudStamp='';
+let consistencyProbeInFlight=false;
+let lastConsistencyProbeAt=0;
 
 function cloneCRC(v){return JSON.parse(JSON.stringify(v??null));}
 function crcEntityKey(kind,item){
@@ -557,6 +560,37 @@ function applyStateDelta(delta,{refresh=true}={}){
  if(refresh&&!isReceivingOperationLocked())scheduleVisualRefresh(40);
  return true;
 }
+async function getCloudStamp(){
+ if(!cloudSessionAllowed())return '';
+ initSupabase();if(!supabaseClient)return '';
+ try{
+  const {data,error}=await supabaseClient.from(SUPABASE_TABLE).select('atualizado_em').eq('id',SUPABASE_ROW_ID).maybeSingle();
+  if(error)throw error;
+  return data?.atualizado_em||'';
+ }catch(e){
+  console.warn('CRC: validação leve do Supabase falhou.',e);
+  return '';
+ }
+}
+async function consistencyProbe(force=false){
+ if(!cloudSessionAllowed()||syncInFlight||consistencyProbeInFlight||localDirty)return false;
+ const now=Date.now();
+ if(!force&&now-lastConsistencyProbeAt<15000)return false;
+ lastConsistencyProbeAt=now;
+ consistencyProbeInFlight=true;
+ try{
+  const stamp=await getCloudStamp();
+  if(!stamp)return false;
+  if(baseCloudStamp && stamp!==baseCloudStamp){
+   console.log('CRC: aparelho perdeu uma atualização; reconciliando com o estado oficial.');
+   await pullCloud(true);
+   return true;
+  }
+  if(!baseCloudStamp)baseCloudStamp=stamp;
+  return false;
+ }finally{consistencyProbeInFlight=false}
+}
+
 async function broadcastStateDelta(delta){
  if(!delta||!supabaseChannel||!realtimeReady)return false;
  try{
@@ -633,7 +667,7 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='11.5';
+ state.version='11.6';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
@@ -1616,7 +1650,7 @@ async function closeOperationalDay(){
  stopCloudSession();clearTimeout(syncTimer);syncQueued=false;syncInFlight=false;
  const resetEpoch=Date.now(),stamp=nowISO();
  const keep={users:state.users.filter(u=>['tower','receiving','patio'].includes(u.role)),drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||stamp,updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch,lastEvent:null}};
- state={version:'11.5',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
+ state={version:'11.6',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
  enforceDefaultAccessAndDedupe();localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();lastAppliedCloudFingerprint=cloudFingerprint(state);
  try{
    initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
@@ -1790,7 +1824,7 @@ function mergeStates(local,remote){
 
  const occupied=new Set(merged.active.map(a=>a.dock));
  merged.docks=uniqueDocks(merged.docks).map(d=>({...d,status:occupied.has(d.number)?'Ocupada':(d.status==='Ocupada'?'Livre':d.status)}));
- merged.version='11.5';
+ merged.version='11.6';
  merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();
  merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
  return normalizeStateShape(merged);
@@ -1844,16 +1878,21 @@ function initRealtime(){
  initSupabase();if(!supabaseClient||supabaseChannel)return;
  realtimeReady=false;
  supabaseChannel=supabaseClient
-  .channel('crc-live-v115',{config:{broadcast:{self:false,ack:true}}})
+  .channel('crc-live-v116',{config:{broadcast:{self:false,ack:true}}})
   .on('broadcast',{event:'crc-delta'},({payload})=>{
     try{
       if(!payload||payload.from===session?.name&&payload.id===state.meta?.lastEvent?.id)return;
+      const beforeRev=Number(state.meta?.revision||0);
+      const incomingRev=Number(payload.revision||0);
       if(isReceivingOperationLocked()){
-        // Não desmonta formulário em uso. O delta é aplicado no estado e a tela atualiza ao liberar.
         applyStateDelta(payload,{refresh:false});
       }else{
         applyStateDelta(payload,{refresh:true});
       }
+      if(payload.cloudStamp)baseCloudStamp=payload.cloudStamp;
+      // Se houver salto de revisão, este aparelho pode ter perdido um evento.
+      // Aplica o evento recebido na hora e confirma a fotografia oficial em seguida.
+      if(incomingRev>beforeRev+1)setTimeout(()=>consistencyProbe(true),120);
     }catch(e){
       console.warn('CRC: falha ao aplicar delta Realtime.',e);
       scheduleCloudPull(250);
@@ -1895,11 +1934,17 @@ async function pullCloud(force=false){
 
     if(force||!localDirty){
       const localSettings={...(state.settings||{})};
-      state=mergeStates(state,incoming);
+      if(force){
+       // Atualização manual/reconexão: Supabase é a verdade oficial.
+       state=incoming;
+      }else{
+       state=mergeStates(state,incoming);
+      }
       enforceDefaultAccessAndDedupe();
       state.settings={...(state.settings||{}),supabaseUrl:localSettings.supabaseUrl||SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
       persistLocalSnapshot();
       syncBaseState=cloneCRC(state);
+      baseCloudStamp=data?.atualizado_em||baseCloudStamp;
       lastAppliedCloudFingerprint=cloudFingerprint(state);
       if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(40);
     }
@@ -1927,33 +1972,61 @@ async function syncCloud(silent=false){
  syncInFlight=true;
  try{
   enforceDefaultAccessAndDedupe();
+
+  // Captura SOMENTE a alteração local desde a última fotografia conhecida.
   const base=syncBaseState?cloneCRC(syncBaseState):cloneCRC(state);
-  const delta=buildStateDelta(base,state);
+  const localDelta=buildStateDelta(base,state);
+  if(!localDelta){
+   localDirty=false;
+   return true;
+  }
+
+  // Validação leve: lê apenas atualizado_em. Não baixa o JSON inteiro.
+  // Se outro aparelho gravou desde nossa última base, só então reconciliamos uma vez.
+  const officialStamp=await getCloudStamp();
+  if(baseCloudStamp && officialStamp && officialStamp!==baseCloudStamp){
+   const savedDelta=cloneCRC(localDelta);
+   const localSettings={...(state.settings||{})};
+   const {data,error}=await supabaseClient.from(SUPABASE_TABLE).select('dados,atualizado_em').eq('id',SUPABASE_ROW_ID).maybeSingle();
+   if(error)throw error;
+   if(data?.dados){
+    state=normalizeStateShape(cloneCRC(data.dados));
+    state.settings={...(state.settings||{}),...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
+    baseCloudStamp=data.atualizado_em||officialStamp;
+    syncBaseState=cloneCRC(state);
+    // Reaplica APENAS a ação feita neste aparelho sobre a verdade oficial.
+    applyStateDelta(savedDelta,{refresh:false});
+   }
+  }
+
+  enforceDefaultAccessAndDedupe();
   const payload=cloneCRC(state);
-  const sentStamp=payload.meta?.updatedAt||nowISO();
-  payload.version='11.5';
+  const sentStamp=nowISO();
+  payload.meta=payload.meta||{};
+  payload.meta.updatedAt=sentStamp;
+  payload.version='11.6';
   payload.settings={...(payload.settings||{}),supabaseUrl:SUPABASE_URL,supabaseKey:'',supabaseEnabled:true};
 
-  // Persistência oficial: uma gravação por ação agrupada.
+  // Uma gravação oficial por ação agrupada.
   const {error}=await supabaseClient.from(SUPABASE_TABLE).upsert(
    {id:SUPABASE_ROW_ID,dados:payload,atualizado_em:sentStamp},
    {onConflict:'id'}
   );
   if(error)throw error;
 
-  // Distribuição online: somente os itens alterados/removidos.
-  if(delta){
-   delta.revision=Number(payload.meta?.revision||0);
-   await broadcastStateDelta(delta);
-  }
+  // Só o delta trafega em tempo real para os outros aparelhos.
+  localDelta.revision=Number(payload.meta?.revision||0);
+  localDelta.cloudStamp=sentStamp;
+  await broadcastStateDelta(localDelta);
 
-  state.settings.lastSync=nowISO();
-  if((state.meta?.updatedAt||'')===sentStamp)localDirty=false;
+  state.meta.updatedAt=sentStamp;
+  state.settings.lastSync=sentStamp;
+  localDirty=false;
+  baseCloudStamp=sentStamp;
   syncBaseState=cloneCRC(state);
   lastAppliedCloudFingerprint=cloudFingerprint(state);
   persistLocalSnapshot();
 
-  if((state.meta?.updatedAt||'')!==sentStamp)syncQueued=true;
   if(!silent)toast('Sincronização concluída.','ok');
   return true;
  }catch(e){
@@ -1965,7 +2038,7 @@ async function syncCloud(silent=false){
   if(syncQueued){
    syncQueued=false;
    clearTimeout(syncTimer);
-   syncTimer=setTimeout(()=>syncCloud(true),700);
+   syncTimer=setTimeout(()=>syncCloud(true),450);
   }
  }
 }
@@ -1982,7 +2055,7 @@ async function clearAll(){
  if(!confirm('ZERAR TUDO que foi lançado? Serão apagados previsões, prioridades, recebimentos, veículos ativos e histórico. Usuários, motoristas, docas, tipologias e configurações serão mantidos. Somente os dados operacionais serão apagados.'))return;
  if(!confirm('Confirma a limpeza total dos dados operacionais? Esta ação não pode ser desfeita.'))return;
  const keep={users:state.users,drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||nowISO(),updatedAt:nowISO(),revision:Number(state.meta?.revision||0)+1,resetEpoch:Number(state.meta?.resetEpoch||0)+1}};
- state={version:'11.5',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
+ state={version:'11.6',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
  enforceDefaultAccessAndDedupe();
  localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();
  try{
@@ -2044,10 +2117,12 @@ async function startCRC(){
  timerLoop=setInterval(()=>{updateTimers();checkTimeAlerts()},1000);
  priorityLoop=setInterval(priorityReminder,15000);
  // Realtime é a fonte principal. A consulta abaixo é apenas uma segurança eventual.
- setInterval(()=>{if(cloudSessionAllowed()&&!syncInFlight&&!isReceivingOperationLocked()&&!localDirty&&Date.now()-lastLocalMutationAt>15000)pullCloud(false)},300000);
+ // Aparelho ativo: validação leve (somente atualizado_em) a cada 20s.
+  // Só baixa o estado completo se detectar que perdeu alguma alteração.
+  setInterval(()=>{if(cloudSessionAllowed()&&!isReceivingOperationLocked()&&!localDirty)consistencyProbe(false)},20000);
 }
 startCRC();
-// CRC V11.5: Realtime Broadcast por delta global; snapshot completo apenas para persistência/recuperação.
+// CRC V11.6: ação isolada -> Supabase -> Realtime delta; validação leve ativa e recuperação oficial sob demanda.
 
 document.addEventListener('click',e=>{
  const logout=e.target.closest('#logoutBtn');
