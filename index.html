@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.2 SHOW DE BOLA + VALIDAÇÃO LEVE</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.2 SHOW DE BOLA + PAINEL TEMPO REAL</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -694,6 +694,40 @@ function refreshPriorityDriverFields(){
 function restoreUIState(snap){if(!snap)return;document.querySelectorAll('#page input,#page select,#page textarea').forEach((el,i)=>{const key=el.id||el.name||`field-${i}`,v=snap.values[key];if(!v)return;if(el.type==='checkbox'||el.type==='radio')el.checked=v.checked;else if(!el.readOnly)el.value=v.value});refreshPriorityDriverFields();scrollTo(snap.x,snap.y);if(snap.activeId){const el=document.getElementById(snap.activeId)||document.querySelector(`[name="${CSS.escape(snap.activeId)}"]`);if(el){el.focus({preventScroll:true});try{el.setSelectionRange(snap.start,snap.end)}catch(e){}}}}
 function refreshUI(preserve=true){if(!session)return;const snap=preserve?captureUIState():null;render();if(snap)restoreUIState(snap);else refreshPriorityDriverFields()}
 function scheduleVisualRefresh(delay=120){clearTimeout(visualRefreshTimer);visualRefreshTimer=setTimeout(()=>{if(isReceivingOperationLocked())return;if(isEditingUI()){scheduleVisualRefresh(450);return}refreshUI(true)},delay)}
+
+function refreshRealtimeCards(){
+ if(!session)return;
+
+ // Painel Geral: cards, prioridades, docas, desempenho e veículos em doca
+ // passam a refletir imediatamente o estado que chegou pelo Realtime.
+ if(currentPage==='dashboard'){
+  const page=$('#page');
+  if(page && !isEditingUI()){
+   const snap={x:scrollX,y:scrollY};
+   page.innerHTML=renderDashboard();
+   bindPage();
+   bindThemeButton();
+   scrollTo(snap.x,snap.y);
+  }
+  return;
+ }
+
+ // Recebimento: atualiza SOMENTE a faixa de prioridades.
+ // Assim uma prioridade some/entra em tempo real sem apagar o formulário,
+ // foto, motorista ou doca que o operador está preenchendo.
+ if(currentPage==='receiving'){
+  const strip=document.querySelector('.receiving-priority-strip');
+  if(strip){
+   strip.innerHTML=`<div class="cards"><div class="kpi priority-kpi"><small>Prioridades</small><strong>${waitingPriorities().length}</strong><em>aguardando</em></div>${priorityCards()}</div>`;
+  }
+  return;
+ }
+
+ // Tela de prioridades: atualiza quando o usuário não estiver digitando.
+ if(currentPage==='priorities' && !isEditingUI()){
+  refreshUI(true);
+ }
+}
 
 let uiEditing=0;
 let receivingOperationLocked=false;
@@ -2071,7 +2105,10 @@ function applyNormalizedRealtime(kind,payload){
  enforceDefaultAccessAndDedupe();
  persistLocalSnapshot();
  if(!syncInFlight)syncBaseState=cloneCRC(state);
- if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(30);
+ if(session){
+  refreshRealtimeCards();
+  if(!isReceivingOperationLocked())scheduleVisualRefresh(30);
+ }
 }
 const CRC_VALIDATION_INTERVAL_MS=15000;
 let crcValidationTimer=null,crcValidationRunning=false;
@@ -2093,7 +2130,11 @@ async function validateCloudFreshness(){
    const seen=Number(crcValidationSeen[table]||0);
    if(remote>seen){if(seen>0)changed=true;crcValidationSeen[table]=remote}
   }
-  if(changed)return await pullCloud(true);
+  if(changed){
+   const ok=await pullCloud(true);
+   if(ok)refreshRealtimeCards();
+   return ok;
+  }
   return true;
  }catch(e){console.warn('CRC: validação leve falhou.',e);return false}
  finally{crcValidationRunning=false}
@@ -2210,6 +2251,7 @@ async function syncCloud(silent=false){
   localDirty=false;
   syncBaseState=cloneCRC(state);
   persistLocalSnapshot();
+  refreshRealtimeCards();
   if(!silent)toast('Alteração confirmada no Supabase.','ok');
   return true;
  }catch(e){
@@ -2311,7 +2353,7 @@ async function startCRC(){
  // Realtime é a fonte principal. A consulta abaixo é apenas uma segurança eventual.
 }
 startCRC();
-// CRC V13.2 Show de Bola: Realtime original preservado + validação leve a cada 15s; pull completo somente quando detectar mudança perdida.
+// CRC V13.2 Show de Bola: Realtime original + validação leve 15s + cards operacionais atualizados imediatamente pelas ações.
 
 document.addEventListener('click',e=>{
  const logout=e.target.closest('#logoutBtn');
