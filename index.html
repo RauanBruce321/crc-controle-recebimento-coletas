@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V12.0 SINCRONIA DIRETA DEFINITIVA</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.2 BANCO NORMALIZADO CORRIGIDO</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -356,7 +356,6 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const DBKEY='crc_v1_state', BACKUPKEY='crc_v1_internal_backup', SESSION='crc_v1_session', SESSION_PERSIST='crc_v1_session_persist';
 const SUPABASE_URL='https://fftgwqcschdxczjuqfur.supabase.co';
 const SUPABASE_KEY='sb_publishable_qlEJOCL5l6Ejhz4G3iqWGQ_OZfhNpe1';
-const SUPABASE_TABLE='crc'; // legado: mantido apenas para compatibilidade de leitura/migração
 const CRC_NORMALIZED_TABLES={
  plan:'crc_previsoes',drivers:'crc_motoristas',docks:'crc_docas',
  patio:'crc_veiculos',active:'crc_veiculos',history:'crc_historico',priorities:'crc_prioridades',logs:'crc_logs',turns:'crc_turnos'
@@ -367,7 +366,6 @@ const CRC_NORMALIZED_TABLES={
 const CRC_CONFIG_TABLE='';
 const CRC_CONFIG_ID='principal';
 const USE_NORMALIZED_SUPABASE=true;
-const SUPABASE_ROW_ID='principal';
 const nowISO=()=>new Date().toISOString(), brDate=x=>new Date(x).toLocaleString('pt-BR');
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -390,7 +388,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:14},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'13.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'13.2',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -574,18 +572,7 @@ function applyStateDelta(delta,{refresh=true}={}){
  if(refresh&&!isReceivingOperationLocked())scheduleVisualRefresh(40);
  return true;
 }
-async function getCloudStamp(){
- if(!cloudSessionAllowed())return '';
- initSupabase();if(!supabaseClient)return '';
- try{
-  const {data,error}=await supabaseClient.from(SUPABASE_TABLE).select('atualizado_em').eq('id',SUPABASE_ROW_ID).maybeSingle();
-  if(error)throw error;
-  return data?.atualizado_em||'';
- }catch(e){
-  console.warn('CRC: validação leve do Supabase falhou.',e);
-  return '';
- }
-}
+async function getCloudStamp(){return '';}
 async function consistencyProbe(force=false){
  if(!cloudSessionAllowed()||syncInFlight||consistencyProbeInFlight||localDirty)return false;
  const now=Date.now();
@@ -1660,21 +1647,29 @@ async function closeOperationalDay(){
  if(!confirm('Finalizar este ciclo operacional? O CRC vai baixar a produção e a auditoria das fotos e depois limpar TODA a operação, mantendo motoristas, docas, tipologias e os 3 usuários.'))return;
  if(!confirm('Confirma? Previsões, pátio, prioridades, veículos em descarga, recebidos, histórico e logs serão zerados para iniciar uma nova programação.'))return;
  exportExcel();downloadAuditPhotos();
- await new Promise(r=>setTimeout(r,800));
- stopCloudSession();clearTimeout(syncTimer);syncQueued=false;syncInFlight=false;
- const resetEpoch=Date.now(),stamp=nowISO();
- const keep={users:state.users.filter(u=>['tower','receiving','patio'].includes(u.role)),drivers:state.drivers,typologies:state.typologies,docks:uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'})),settings:state.settings,meta:{createdAt:state.meta?.createdAt||stamp,updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch,lastEvent:null}};
- state={version:'13.0',...keep,plan:[],patio:[],active:[],history:[],priorities:[],logs:[],turns:[]};
- enforceDefaultAccessAndDedupe();localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();lastAppliedCloudFingerprint=cloudFingerprint(state);
+ await new Promise(r=>setTimeout(r,500));
  try{
-   initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
-   const payload=JSON.parse(JSON.stringify(state));payload.settings={...(payload.settings||{}),supabaseUrl:SUPABASE_URL,supabaseKey:'',supabaseEnabled:true};
-   const {error}=await supabaseClient.from(SUPABASE_TABLE).upsert({id:SUPABASE_ROW_ID,dados:payload,atualizado_em:stamp},{onConflict:'id'});
+  initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
+  for(const table of ['crc_previsoes','crc_prioridades','crc_veiculos','crc_historico','crc_logs','crc_turnos']){
+   const {error}=await supabaseClient.from(table).delete().not('id','is',null);
    if(error)throw error;
-   state.settings.lastSync=nowISO();persistLocalSnapshot();render();initRealtime();
-   toast('Ciclo finalizado: arquivos baixados e operação zerada no CRC e no Supabase.','ok',9000);
+  }
+  const stamp=nowISO();
+  state.plan=[];state.patio=[];state.active=[];state.history=[];state.priorities=[];state.logs=[];state.turns=[];
+  state.docks=uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre',updatedAt:stamp}));
+  state.meta={...(state.meta||{}),updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch:Date.now(),lastEvent:null};
+  // Mantém as docas no banco e libera as que estavam ocupadas.
+  if(state.docks.length){
+   const rows=state.docks.map(d=>cloudRowFor('docks',d));
+   const {error}=await supabaseClient.from('crc_docas').upsert(rows,{onConflict:'numero'});
+   if(error)throw error;
+  }
+  localStorage.removeItem(BACKUPKEY);
+  persistLocalSnapshot();syncBaseState=cloneCRC(state);localDirty=false;render();
+  toast('Ciclo finalizado: arquivos baixados e operação zerada no CRC e no Supabase.','ok',9000);
  }catch(e){
-   render();initRealtime();toast('A operação foi zerada neste aparelho, mas o Supabase não confirmou a limpeza: '+e.message,'error',11000);
+  toast('O Supabase não confirmou a limpeza: '+(e?.message||e),'error',11000);
+  try{await pullCloud(true)}catch(_){}
  }
 }
 
@@ -1838,7 +1833,7 @@ function mergeStates(local,remote){
 
  const occupied=new Set(merged.active.map(a=>a.dock));
  merged.docks=uniqueDocks(merged.docks).map(d=>({...d,status:occupied.has(d.number)?'Ocupada':(d.status==='Ocupada'?'Livre':d.status)}));
- merged.version='13.0';
+ merged.version='13.2';
  merged.meta.updatedAt=new Date(Math.max(lt,rt,Date.now())).toISOString();
  merged.meta.revision=Math.max(Number(local.meta?.revision||0),Number(remote.meta?.revision||0))+1;
  return normalizeStateShape(merged);
@@ -1887,6 +1882,147 @@ function scheduleCloudPull(delay=250){
 
 }
 
+
+function cloudAppId(row){
+ const d=row?.dados;
+ return String((d&&d.id)||row?.codigo_cliente||row?.numero||'');
+}
+function priorityDbStatus(status){
+ const x=String(status||'').toLowerCase();
+ if(x.includes('concl')||x.includes('atend'))return 'atendida';
+ if(x.includes('cancel'))return 'cancelada';
+ return 'pendente';
+}
+function turnDbStatus(item){
+ return item?.closedAt||item?.finalizado_em||String(item?.status||'').toLowerCase()==='finalizado'?'finalizado':'aberto';
+}
+function cloudRowFor(kind,item){
+ const dados=cloneCRC(item||{});
+ if(kind==='patio'||kind==='active')dados._crc_kind=kind;
+ const code=String(item?.id||'');
+ switch(kind){
+  case 'plan':
+   return {
+    codigo_cliente:code,
+    motorista:item.driverName||item.motorista||null,
+    placa:item.plate||item.placa||null,
+    cavalo:item.horse||item.cavalo||null,
+    tipologia:item.typology||item.tipologia||null,
+    operacao:item.operation||item.operacao||null,
+    doca:item.dock||item.doca||null,
+    awbs_previstas:Number(item.awbs||item.awbsPrevistas||0),
+    volumes_previstos:Number(item.volumes||item.expectedVolumes||0),
+    peso:Number(item.weight||item.peso||0),
+    status:'aguardando',
+    dados
+   };
+  case 'drivers':
+   return {
+    codigo_cliente:code,
+    nome:item.name||item.nome||'Motorista',
+    placa:item.plate||item.placa||null,
+    cavalo:item.horse||item.cavalo||'S/N',
+    tipologia:item.typology||item.tipologia||null,
+    dados
+   };
+  case 'docks':
+   return {
+    numero:String(item.number||item.numero||''),
+    status:['Livre','Ocupada','Bloqueada'].includes(item.status)?item.status:'Livre',
+    veiculo_id:null,
+    dados
+   };
+  case 'patio':
+  case 'active':
+   return {
+    codigo_cliente:code,
+    driver_id:item.driverId||item.driver_id||null,
+    motorista:item.driverName||item.motorista||null,
+    placa:item.plate||item.placa||null,
+    cavalo:item.horse||item.cavalo||null,
+    tipologia:item.typology||item.tipologia||null,
+    operacao:item.operation||item.operacao||null,
+    doca:item.dock||item.doca||null,
+    status:kind==='active'?'descarregando':'patio',
+    volumes_previstos:Number(item.expectedVolumes||item.volumes_previstos||0),
+    volumes_recebidos:Number(item.receivedVolumes||item.volumes_recebidos||0),
+    awbs_previstas:Number(item.awbs||item.awbs_previstas||0),
+    peso:Number(item.weight||item.peso||0),
+    inicio_descarregamento:kind==='active'?(item.startedAt||item.inicio_descarregamento||null):null,
+    fim_descarregamento:null,
+    dados
+   };
+  case 'history':
+   return {
+    codigo_cliente:code,
+    veiculo_id:null,
+    driver_id:item.driverId||item.driver_id||null,
+    motorista:item.driverName||item.motorista||null,
+    placa:item.plate||item.placa||null,
+    cavalo:item.horse||item.cavalo||null,
+    tipologia:item.typology||item.tipologia||null,
+    operacao:item.operation||item.operacao||null,
+    doca:item.dock||item.doca||null,
+    volumes_previstos:Number(item.expectedVolumes||item.volumes_previstos||0),
+    volumes_recebidos:Number(item.receivedVolumes||item.volumes_recebidos||0),
+    awbs_previstas:Number(item.awbs||item.awbs_previstas||0),
+    inicio_descarregamento:item.startedAt||item.inicio_descarregamento||null,
+    fim_descarregamento:item.finishedAt||item.fim_descarregamento||null,
+    status:'concluido',
+    dados
+   };
+  case 'priorities':
+   return {
+    codigo_cliente:code,
+    driver_id:item.driverId||item.driver_id||null,
+    motorista:item.driverName||item.motorista||null,
+    placa:item.plate||item.placa||null,
+    cavalo:item.horse||item.cavalo||null,
+    tipologia:item.typology||item.tipologia||null,
+    operacao:item.operation||item.operacao||null,
+    doca:item.dock||item.doca||null,
+    status:priorityDbStatus(item.status),
+    dados
+   };
+  case 'logs':
+   return {
+    codigo_cliente:code,
+    usuario:item.user||item.usuario||null,
+    acao:item.action||item.acao||null,
+    detalhe:item.detail||item.detalhe||null,
+    dados
+   };
+  case 'turns':
+   return {
+    codigo_cliente:code,
+    usuario:item.closedBy||item.user||item.usuario||null,
+    iniciado_em:item.startedAt||item.iniciado_em||item.createdAt||null,
+    finalizado_em:item.closedAt||item.finalizado_em||null,
+    status:turnDbStatus(item),
+    dados
+   };
+  default:
+   return {codigo_cliente:code,dados};
+ }
+}
+function conflictColumnFor(kind){
+ return kind==='docks'?'numero':'codigo_cliente';
+}
+async function deleteCloudItems(kind,ids,baseState){
+ const table=CRC_NORMALIZED_TABLES[kind];
+ if(!table||!ids?.length)return;
+ if(kind==='docks'){
+  const source=(baseState?.docks||[]);
+  const numbers=ids.map(id=>source.find(x=>String(x.id)===String(id))?.number).filter(Boolean);
+  if(!numbers.length)return;
+  const {error}=await supabaseClient.from(table).delete().in('numero',numbers);
+  if(error)throw error;
+  return;
+ }
+ const {error}=await supabaseClient.from(table).delete().in('codigo_cliente',ids.map(String));
+ if(error)throw error;
+}
+
 function normalizedKindFromTable(table){return Object.keys(CRC_NORMALIZED_TABLES).find(k=>CRC_NORMALIZED_TABLES[k]===table)||''}
 function kindFromVehicleRow(row){
  const k=row?.dados?._crc_kind;
@@ -1899,15 +2035,15 @@ function applyNormalizedRealtime(kind,payload){
  if(!kind||!payload)return;
  const event=payload.eventType;
  const row=event==='DELETE'?payload.old:payload.new;
- const id=String(row?.id||'');
- if(!id)return;
  if(payload.table==='crc_veiculos')kind=kindFromVehicleRow(row);
+ const item=stripCloudMeta(row?.dados||{});
+ const id=String(item?.id||row?.codigo_cliente||row?.numero||'');
+ if(!id)return;
  const arr=Array.isArray(state[kind])?state[kind]:[];
- const idx=arr.findIndex(x=>crcEntityKey(kind,x)===id);
+ const idx=arr.findIndex(x=>String(crcEntityKey(kind,x))===id);
  if(event==='DELETE'){
   if(idx>=0)arr.splice(idx,1);
  }else{
-  const item=stripCloudMeta(row?.dados||{});
   if(!item||typeof item!=='object')return;
   if(!item.id)item.id=id;
   item.updatedAt=row?.ultima_alteracao||item.updatedAt||nowISO();
@@ -1920,8 +2056,6 @@ function applyNormalizedRealtime(kind,payload){
  state[kind]=arr;
  enforceDefaultAccessAndDedupe();
  persistLocalSnapshot();
- // Não troca a base de comparação enquanto um envio local está em andamento.
- // Isso evita que o eco do Realtime faça outras alterações da mesma ação desaparecerem.
  if(!syncInFlight)syncBaseState=cloneCRC(state);
  if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(30);
 }
@@ -1929,7 +2063,7 @@ function initRealtime(){
  if(!cloudSessionAllowed())return;
  initSupabase();if(!supabaseClient||supabaseChannel)return;
  realtimeReady=false;
- let ch=supabaseClient.channel('crc-producao-v13');
+ let ch=supabaseClient.channel('crc-producao-v132');
  const uniqueTables=[...new Set(Object.values(CRC_NORMALIZED_TABLES))];
  uniqueTables.forEach(table=>{
   ch=ch.on('postgres_changes',{event:'*',schema:'public',table},payload=>{
@@ -1955,36 +2089,49 @@ async function pullCloud(force=false){
  try{
   const next=normalizeStateShape(cloneCRC(seed()));
   const localSettings={...(state.settings||{})};
-  // Preserva cadastros internos que não possuem tabela no projeto novo.
-  next.users=cloneCRC(state.users||next.users);next.typologies=cloneCRC(state.typologies||next.typologies);
+  next.users=cloneCRC(state.users||next.users);
+  next.typologies=cloneCRC(state.typologies||next.typologies);
   const tableRows={};
   for(const table of [...new Set(Object.values(CRC_NORMALIZED_TABLES))]){
-   const {data,error}=await supabaseClient.from(table).select('id,dados,ultima_alteracao');
-   if(error)throw error; tableRows[table]=data||[];
+   const {data,error}=await supabaseClient.from(table).select('*');
+   if(error)throw error;
+   tableRows[table]=data||[];
   }
   for(const [kind,table] of Object.entries(CRC_NORMALIZED_TABLES)){
    let rows=tableRows[table]||[];
    if(table==='crc_veiculos')rows=rows.filter(r=>kindFromVehicleRow(r)===kind);
-   next[kind]=rows.map(row=>{
+   const mapped=rows.map(row=>{
     const item=stripCloudMeta(row.dados||{});
-    if(!item.id)item.id=String(row.id);
+    if(!item.id)item.id=String(row.codigo_cliente||row.numero||row.id);
     if(row.ultima_alteracao)item.updatedAt=row.ultima_alteracao;
     return item;
-   });
+   }).filter(x=>x&&x.id);
+   // Doca padrão só é usada enquanto o projeto está realmente vazio.
+   if(kind==='docks'&&!mapped.length)next.docks=cloneCRC(state.docks?.length?state.docks:next.docks);
+   else next[kind]=mapped;
+  }
+  // Primeiro acesso ao projeto novo: publica as docas locais/default uma única vez.
+  if(!(tableRows['crc_docas']||[]).length && (next.docks||[]).length){
+   const dockRows=(next.docks||[]).map(d=>cloudRowFor('docks',d));
+   const {error:dockBootstrapError}=await supabaseClient.from('crc_docas').upsert(dockRows,{onConflict:'numero'});
+   if(dockBootstrapError)throw dockBootstrapError;
   }
   next.settings={...next.settings,...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
-  next.version='13.0';
+  next.version='13.2';
   state=normalizeStateShape(next);
   enforceDefaultAccessAndDedupe();
-  persistLocalSnapshot();syncBaseState=cloneCRC(state);localDirty=false;
+  persistLocalSnapshot();
+  syncBaseState=cloneCRC(state);
+  localDirty=false;
   if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(30);
   return true;
  }catch(e){
   console.error('CRC: falha ao carregar tabelas separadas do Supabase.',e);
-  if(document.visibilityState==='visible')toast('Falha ao atualizar dados do Supabase.','error',6500);
+  if(document.visibilityState==='visible')toast('Falha ao atualizar dados do Supabase: '+(e?.message||e),'error',8000);
   return false;
  }
 }
+
 async function syncCloud(silent=false){
  if(!cloudSessionAllowed()){syncQueued=true;return false}
  initSupabase();if(!supabaseClient){if(!silent)toast('Supabase indisponível.','error');return false}
@@ -1996,29 +2143,39 @@ async function syncCloud(silent=false){
   const base=syncBaseState?cloneCRC(syncBaseState):normalizeStateShape(cloneCRC(seed()));
   const delta=buildStateDelta(base,state);
   if(!delta){localDirty=false;return true}
+
   for(const [kind,items] of Object.entries(delta.upserts||{})){
    const table=CRC_NORMALIZED_TABLES[kind];if(!table||!items?.length)continue;
-   const rows=items.map(item=>{
-    const dados=cloneCRC(item);if(table==='crc_veiculos')dados._crc_kind=kind;
-    return {id:crcEntityKey(kind,item),dados};
-   });
-   const {error}=await supabaseClient.from(table).upsert(rows,{onConflict:'id'});if(error)throw error;
+   const rows=items.map(item=>cloudRowFor(kind,item));
+   const options={onConflict:conflictColumnFor(kind)};
+   if(kind==='history')options.ignoreDuplicates=true;
+   const {error}=await supabaseClient.from(table).upsert(rows,options);
+   if(error)throw error;
   }
+
   for(const [kind,ids] of Object.entries(delta.deletes||{})){
-   const table=CRC_NORMALIZED_TABLES[kind];if(!table||!ids?.length)continue;
-   // IDs são únicos no fluxo; apagar o registro é a fonte oficial da remoção.
-   const {error}=await supabaseClient.from(table).delete().in('id',ids.map(String));if(error)throw error;
+   await deleteCloudItems(kind,ids,beforeSync);
   }
-  state.settings.lastSync=nowISO();localDirty=false;syncBaseState=cloneCRC(state);persistLocalSnapshot();
-  if(!silent)toast('Alteração confirmada no Supabase.','ok');return true;
+
+  state.settings.lastSync=nowISO();
+  localDirty=false;
+  syncBaseState=cloneCRC(state);
+  persistLocalSnapshot();
+  if(!silent)toast('Alteração confirmada no Supabase.','ok');
+  return true;
  }catch(e){
   console.error('CRC: alteração NÃO confirmada no Supabase.',e);
-  // Servidor é a fonte da verdade: em falha, reconcilia em vez de deixar uma ação fantasma na tela.
+  // Se o servidor não confirmou, remove a ação local fantasma e volta à verdade oficial.
   try{await pullCloud(true)}catch(_){}
-  if(!silent)toast('Não foi possível atualizar. Tente novamente.','error',8000);return false;
+  if(!silent)toast('Não foi possível atualizar: '+(e?.message||e),'error',9000);
+  return false;
  }finally{
   syncInFlight=false;
-  if(syncQueued){syncQueued=false;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),300)}
+  if(syncQueued){
+   syncQueued=false;
+   clearTimeout(syncTimer);
+   syncTimer=setTimeout(()=>syncCloud(true),300);
+  }
  }
 }
 function restoreInternalBackup(){
@@ -2035,17 +2192,23 @@ async function clearAll(){
  if(!confirm('Confirma a limpeza total dos dados operacionais? Esta ação não pode ser desfeita.'))return;
  try{
   initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
-  // Limpa somente tabelas operacionais. Motoristas e docas permanecem cadastrados.
   for(const table of ['crc_previsoes','crc_prioridades','crc_veiculos','crc_historico','crc_logs','crc_turnos']){
    const {error}=await supabaseClient.from(table).delete().not('id','is',null);if(error)throw error;
   }
+  const stamp=nowISO();
   state.plan=[];state.patio=[];state.active=[];state.history=[];state.priorities=[];state.logs=[];state.turns=[];
-  state.docks=uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre'}));
-  state.meta={...(state.meta||{}),updatedAt:nowISO(),revision:Number(state.meta?.revision||0)+1,resetEpoch:Number(state.meta?.resetEpoch||0)+1};
+  state.docks=uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre',updatedAt:stamp}));
+  if(state.docks.length){
+   const rows=state.docks.map(d=>cloudRowFor('docks',d));
+   const {error}=await supabaseClient.from('crc_docas').upsert(rows,{onConflict:'numero'});
+   if(error)throw error;
+  }
+  state.meta={...(state.meta||{}),updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch:Number(state.meta?.resetEpoch||0)+1};
   localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();syncBaseState=cloneCRC(state);localDirty=false;refreshUI(false);
   toast('Sistema operacional zerado no aparelho e no Supabase.','ok',7000);
- }catch(e){toast('Falha ao zerar o Supabase: '+e.message,'error',10000)}
+ }catch(e){toast('Falha ao zerar o Supabase: '+(e?.message||e),'error',10000)}
 }
+
 function updateTimers(){
  $$('[data-start]').forEach(el=>{const start=Date.parse(el.dataset.start),sec=Math.max(0,Math.floor((Date.now()-(Number.isFinite(start)?start:Date.now()))/1000)),h=String(Math.floor(sec/3600)).padStart(2,'0'),m=String(Math.floor(sec%3600/60)).padStart(2,'0'),s=String(sec%60).padStart(2,'0');el.textContent=`${h}:${m}:${s}`});
  if($('#alertRail'))$('#alertRail').innerHTML=alerts()
@@ -2099,7 +2262,7 @@ async function startCRC(){
  // Realtime é a fonte principal. A consulta abaixo é apenas uma segurança eventual.
 }
 startCRC();
-// CRC V13.0: carga inicial única -> ação -> confirmação Supabase -> Realtime delta. Sem polling e sem reconciliação automática concorrente.
+// CRC V13.2: carga inicial única -> ação -> confirmação Supabase -> Realtime delta. Sem polling e sem reconciliação automática concorrente.
 
 document.addEventListener('click',e=>{
  const logout=e.target.closest('#logoutBtn');
@@ -2113,8 +2276,7 @@ document.addEventListener('submit',e=>{
  setTimeout(()=>{if(f)f.dataset.submitting='0'},900);
 },true);
 
-// V11.5: sem GET extra em focus/pageshow. Realtime Broadcast mantém os aparelhos online;
-// visibilitychange/online e o botão ↻ fazem a recuperação quando necessário.
+// V13.2: sem polling. Realtime PostgreSQL mantém os aparelhos online; ao voltar do segundo plano ou tocar ↻, faz uma carga oficial única.
 </script>
 
 
