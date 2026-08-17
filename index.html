@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.12.0 ESTÁVEL + AÇÕES ATÔMICAS</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.13.0 FLUXO PRIORIDADE + AÇÕES ATÔMICAS</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -493,7 +493,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:15},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'13.12.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'13.13.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -847,7 +847,7 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='13.12.0';
+ state.version='13.13.0';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
@@ -1003,21 +1003,47 @@ return true;
  $('#toasts').appendChild(d);setTimeout(removeToast,duration);
 }
 
-function toast(message,type='ok',duration=4200){
- const host=$('#toasts');
- if(!host)return;
+const crcToastQueue=[];
+const CRC_MAX_VISIBLE_TOASTS=2;
+
+function flushCRCToastQueue(){
+ const host=$('#toasts');if(!host)return;
+ while(host.querySelectorAll('.toast').length<CRC_MAX_VISIBLE_TOASTS && crcToastQueue.length){
+  const item=crcToastQueue.shift();
+  showCRCToast(item.message,item.type,item.duration);
+ }
+}
+
+function showCRCToast(message,type='ok',duration=4200){
+ const host=$('#toasts');if(!host)return;
  const d=document.createElement('div');
  d.className=`toast ${type}`;
  d.innerHTML=`<div>${esc(String(message||''))}</div>`;
  d.style.touchAction='pan-y';
  host.appendChild(d);
- let startX=0,dx=0,dragging=false;
- const remove=()=>{if(!d.isConnected)return;d.style.transition='transform .18s ease,opacity .18s ease';d.style.opacity='0';d.style.transform='translateX(120%)';setTimeout(()=>d.remove(),180)};
+ let startX=0,dx=0,dragging=false,removed=false;
+ const remove=()=>{
+  if(removed||!d.isConnected)return;
+  removed=true;
+  d.style.transition='transform .18s ease,opacity .18s ease';
+  d.style.opacity='0';d.style.transform='translateX(120%)';
+  setTimeout(()=>{d.remove();flushCRCToastQueue()},180);
+ };
  d.addEventListener('pointerdown',e=>{startX=e.clientX;dx=0;dragging=true;d.setPointerCapture?.(e.pointerId);d.style.transition='none'});
  d.addEventListener('pointermove',e=>{if(!dragging)return;dx=e.clientX-startX;if(dx>0){d.style.transform=`translateX(${dx}px)`;d.style.opacity=String(Math.max(.25,1-dx/260))}});
- const finish=e=>{if(!dragging)return;dragging=false;if(dx>75)remove();else{d.style.transition='transform .16s ease,opacity .16s ease';d.style.transform='translateX(0)';d.style.opacity='1'}};
+ const finish=()=>{if(!dragging)return;dragging=false;if(dx>75)remove();else{d.style.transition='transform .16s ease,opacity .16s ease';d.style.transform='translateX(0)';d.style.opacity='1'}};
  d.addEventListener('pointerup',finish);d.addEventListener('pointercancel',finish);
  setTimeout(remove,duration);
+}
+
+function toast(message,type='ok',duration=4200){
+ const host=$('#toasts');if(!host)return;
+ if(host.querySelectorAll('.toast').length>=CRC_MAX_VISIBLE_TOASTS){
+  crcToastQueue.push({message,type,duration});
+  if(crcToastQueue.length>20)crcToastQueue.splice(0,crcToastQueue.length-20);
+  return;
+ }
+ showCRCToast(message,type,duration);
 }
 
 function log(action,detail='',autoSave=true){
@@ -1658,86 +1684,119 @@ async function fileToDataURL(file,max=720,quality=.48){
  return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>{const img=new Image();img.onload=()=>{const scale=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);resolve(c.toDataURL('image/jpeg',quality))};img.onerror=reject;img.src=r.result};r.onerror=reject;r.readAsDataURL(file)});
 }
 let startingReceiving=false;
+
+async function startReceivingAtomic(activeRecord,patioIds=[],priorityId=null){
+ if(!state.settings.supabaseEnabled)return true;
+ initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
+ const activeRow=cloudRowFor('active',activeRecord);
+ const {data,error}=await supabaseClient.rpc('crc_iniciar_descarregamento',{
+  p_veiculo:activeRow,
+  p_patio_ids:(patioIds||[]).map(String),
+  p_prioridade:priorityId?String(priorityId):null,
+  p_epoch:currentCycleEpoch()
+ });
+ if(error)throw error;
+ if(data!==true)throw new Error('Supabase não confirmou o início atômico');
+ return true;
+}
+
 async function startReceiving(e){
  e.preventDefault();
  if(startingReceiving)return;
  const form=e.currentTarget,submit=form?.querySelector('button[type="submit"]');
  const originalText=submit?.textContent||'Iniciar descarregamento';
+
  try{
   const driver=driverById($('#driverSelect').value),dock=$('#dockSelect').value,photo=$('#startPhotoData').value,hc=Math.max(1,Number($('#hcCount')?.value||1));
   if(!driver||!dock||!photo)return toast('Preencha motorista, doca e registre a foto inicial.','error');
+
   const correctedPlate=normalizeDriverPlate($('#driverPlateView')?.value||driver.plate);
   const correctedHorse=normalizeDriverPlate($('#driverHorseView')?.value||driver.horse)||'S/N';
   const correctedTyp=String($('#driverTypView')?.value||driver.typology).trim();
-  if((state.active||[]).some(a=>sameId(a.driverId,driver.id)||normalizeDriverPlate(a.plate)===normalizeDriverPlate(driver.plate)))return toast('Este motorista/veículo já está em descarregamento.','error');
-  if((state.priorities||[]).some(p=>p.status==='Aguardando'&&(sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate))))return toast('Este motorista/veículo está em Prioridade. Finalize/cancele essa ação antes de iniciar outra.','error');
-  if(correctedPlate && state.drivers.some(d=>d.id!==driver.id&&normalizeDriverPlate(d.plate)===correctedPlate))return toast('A placa corrigida já pertence a outro motorista.','error');
-  Object.assign(driver,{plate:correctedPlate||driver.plate,horse:correctedHorse,typology:correctedTyp||driver.typology,updatedAt:nowISO()});
-  state.patio.forEach(p=>{if(sameId(p.driverId,driver.id)){p.plate=driver.plate;p.horse=driver.horse;p.typology=driver.typology;p.updatedAt=nowISO();}});
+
+  if((state.active||[]).some(a=>sameId(a.driverId,driver.id)||normalizeDriverPlate(a.plate)===normalizeDriverPlate(correctedPlate||driver.plate)))
+   return toast('Este motorista/veículo já está em descarregamento.','error');
+
+  if(correctedPlate && state.drivers.some(d=>d.id!==driver.id&&normalizeDriverPlate(d.plate)===correctedPlate))
+   return toast('A placa corrigida já pertence a outro motorista.','error');
+
   const dockNorm=normalizeDockNumber(dock);
-  if((state.active||[]).some(a=>normalizeDockNumber(a.dock)===dockNorm)||state.docks.find(d=>normalizeDockNumber(d.number)===dockNorm)?.status!=='Livre')return toast('Esta doca está ocupada ou bloqueada. Atualize a tela se necessário.','error');
-  startingReceiving=true;if(submit){submit.disabled=true;submit.textContent='Iniciando...';}
-  const balance=planBalance(driver.typology),target=state.typologies.find(t=>t.name===driver.typology)?.targetMin||30;
-  const pr=state.priorities.find(p=>p.status==='Aguardando'&&(sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate)));
-  state.meta=state.meta||{};
-  if(pr){
-    state.meta.resolvedPriorityIds=[...new Set([...(state.meta.resolvedPriorityIds||[]),pr.id])];
-    state.priorities=state.priorities.filter(p=>p.id!==pr.id);
-  }
-  const patioConsumed=state.patio.filter(p=>sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate));
-  if(patioConsumed.length)state.meta.removedPatioIds=[...new Set([...(state.meta.removedPatioIds||[]),...patioConsumed.map(p=>p.id)])];
+  if((state.active||[]).some(a=>normalizeDockNumber(a.dock)===dockNorm)||state.docks.find(d=>normalizeDockNumber(d.number)===dockNorm)?.status!=='Livre')
+   return toast('Esta doca está ocupada ou bloqueada. Atualize a tela se necessário.','error');
+
+  startingReceiving=true;
+  if(submit){submit.disabled=true;submit.textContent='Confirmando no Supabase...'}
+
+  const driverUpdated={...driver,plate:correctedPlate||driver.plate,horse:correctedHorse,typology:correctedTyp||driver.typology,updatedAt:nowISO()};
+  const balance=planBalance(driverUpdated.typology),target=state.typologies.find(t=>t.name===driverUpdated.typology)?.targetMin||30;
+
+  // PRIORIDADE NÃO BLOQUEIA A DESCARGA. Ela é consumida quando o descarregamento inicia.
+  const pr=(state.priorities||[]).find(p=>p.status==='Aguardando'&&(sameId(p.driverId,driverUpdated.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driverUpdated.plate)))||null;
+
+  const patioConsumed=(state.patio||[]).filter(p=>sameId(p.driverId,driverUpdated.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driverUpdated.plate));
   const activeId=patioConsumed[0]?.id||uid();
   const sourcePatioIds=patioConsumed.map(p=>p.id);
-  state.active.push({id:activeId,driverId:driver.id,driverName:driver.name,plate:driver.plate,horse:driver.horse,typology:driver.typology,dock:normalizeDockNumber(dock),operation:session.operation,expectedVolumes:balance.expected,targetMin:target,startedAt:nowISO(),startPhoto:photo,priority:!!pr,priorityId:pr?.id||null,priorityReason:pr?.reason||'',sourcePatioIds,updatedAt:nowISO(),operator:session.name,hc,alert50:false,alert80:false,alert100:false,lastOvertimeAlert:0});
+  const startedAt=nowISO();
+
+  const activeRecord={
+   id:activeId,driverId:driverUpdated.id,driverName:driverUpdated.name,plate:driverUpdated.plate,horse:driverUpdated.horse,
+   typology:driverUpdated.typology,dock:dockNorm,operation:session.operation,expectedVolumes:balance.expected,targetMin:target,
+   startedAt,startPhoto:photo,priority:!!pr,priorityId:pr?.id||null,priorityReason:pr?.reason||'',sourcePatioIds,
+   updatedAt:startedAt,operator:session.name,hc,alert50:false,alert80:false,alert100:false,lastOvertimeAlert:0
+  };
+
+  // O SERVIDOR CONFIRMA PRIMEIRO. A tela só muda depois.
+  await startReceivingAtomic(activeRecord,sourcePatioIds,pr?.id||null);
+
+  Object.assign(driver,driverUpdated);
   state.patio=state.patio.filter(p=>!sameId(p.driverId,driver.id)&&normalizeDriverPlate(p.plate)!==normalizeDriverPlate(driver.plate));
-   const dockRow=state.docks.find(d=>d.number===dock);if(dockRow)dockRow.status='Ocupada';
-  log('Iniciou descarregamento',`${driver.name} • Doca ${dock} • HC ${hc}`,false);
-  save(false);
-  const startConfirmed=state.settings.supabaseEnabled?await syncCloud(true):true;
-  if(!startConfirmed)throw new Error('Supabase não confirmou o início do descarregamento');
-  pendingIncomingState=null;unlockReceivingOperation({applyPending:false,refresh:false});refreshUI(false);
+  state.active=state.active.filter(a=>String(a.id)!==String(activeRecord.id));
+  state.active.push(activeRecord);
 
-toast('Descarregamento iniciado e confirmado no Supabase.','ok');
+  if(pr){
+   const lp=state.priorities.find(p=>String(p.id)===String(pr.id));
+   if(lp){lp.status='Em descarga';lp.activeVehicleId=activeRecord.id;lp.dock=dockNorm;lp.startedAt=startedAt;lp.updatedAt=startedAt}
+  }
 
-const legendaInicio=
-`🚛 INÍCIO DO DESCARREGAMENTO
+  const dockRow=state.docks.find(d=>normalizeDockNumber(d.number)===dockNorm);
+  if(dockRow){dockRow.status='Ocupada';dockRow.updatedAt=startedAt}
+
+  state.meta=state.meta||{};
+  if(patioConsumed.length)state.meta.removedPatioIds=[...new Set([...(state.meta.removedPatioIds||[]),...sourcePatioIds])];
+
+  log('Iniciou descarregamento',`${driver.name} • Doca ${dockNorm} • HC ${hc}${pr?' • PRIORIDADE':''}`,false);
+  persistLocalSnapshot();
+  syncBaseState=cloneCRC(state);
+  pendingIncomingState=null;
+  unlockReceivingOperation({applyPending:false,refresh:false});
+  refreshUI(false);
+  toast(pr?'Descarregamento prioritário iniciado e confirmado no Supabase.':'Descarregamento iniciado e confirmado no Supabase.','ok');
+
+  const legendaInicio=`🚛 INÍCIO DO DESCARREGAMENTO${pr?' • PRIORIDADE':''}
 
 Motorista: ${driver.name}
-
 Placa: ${driver.plate}
-
 Cavalo: ${driver.horse}
-
 Tipologia: ${driver.typology}
-
-Doca: ${dock}
-
+Doca: ${dockNorm}
 Operador: ${session.name}
-
 Data: ${new Date().toLocaleString('pt-BR')}`;
 
-setTimeout(async()=>{
+  setTimeout(async()=>{
+   if(confirm('Deseja compartilhar a Foto Inicial pelo WhatsApp?')){
+    await compartilharFotoOperacao(photo,legendaInicio,`Inicio_${driver.plate}.jpg`);
+   }
+  },300);
 
- if(confirm('Deseja compartilhar a Foto Inicial pelo WhatsApp?')){
-
-  await compartilharFotoOperacao(
-   photo,
-   legendaInicio,
-   `Inicio_${driver.plate}.jpg`
-  );
-
+ }catch(err){
+  console.error('Erro ao iniciar descarregamento:',err);
+  toast('Não foi possível iniciar: '+(err?.message||'ação não confirmada pelo Supabase.'),'error',10000);
+  try{await pullCloud(true)}catch(_){}
+ }finally{
+  startingReceiving=false;
+  const liveBtn=$('#receivingForm button[type="submit"]')||submit;
+  if(liveBtn&&document.body.contains(liveBtn)){liveBtn.disabled=false;liveBtn.textContent=originalText}
  }
-
-},300);
-
-}catch(err){
- console.error('Erro ao iniciar descarregamento:',err);
- toast('Não foi possível iniciar. A ação não foi confirmada pelo Supabase.','error',9000);
- try{await pullCloud(true)}catch(e){}
-}finally{
- startingReceiving=false;
- if(submit&&document.body.contains(submit)){submit.disabled=false;submit.textContent=originalText;}
-}
 }
 function getActiveVehicleSnapshot(id){
  const live=state.active.find(x=>x.id===id);
@@ -2872,7 +2931,7 @@ async function pullCloud(force=false){
    if(dockBootstrapError)throw dockBootstrapError;
   }
   next.settings={...next.settings,...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
-  next.version='13.12.0';
+  next.version='13.13.0';
   state=normalizeStateShape(next);
   enforceDefaultAccessAndDedupe();
   // Autocorreção eventual: só escreve se o banco trouxe um registro incompatível
@@ -3080,7 +3139,7 @@ async function startCRC(){
  }
 }
 startCRC();
-// CRC V13.12: sincronização incremental inspirada no CCPB.
+// CRC V13.13: sincronização incremental inspirada no CCPB.
 // postgres_changes é a única via de tempo real; validação leve de 3 min atua somente como contingência.
 
 document.addEventListener('click',e=>{
@@ -3101,3 +3160,6 @@ document.addEventListener('submit',e=>{
 
 </body>
 </html>
+<style id="crc-v1313-toast-limit">
+#toasts .toast:nth-child(n+3){display:none!important}
+</style>
