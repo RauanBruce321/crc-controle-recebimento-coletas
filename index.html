@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.11.0 CICLO SOBERANO + SEM RETORNO LOCAL</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.12.0 ESTÁVEL + AÇÕES ATÔMICAS</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -493,7 +493,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:15},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'13.11.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'13.12.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -847,7 +847,7 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='13.11.0';
+ state.version='13.12.0';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
@@ -1082,7 +1082,7 @@ function priorityCards(){
 function kpis(){
   const s=stats(),queue=waitingPriorities();
   const regular=[['Carros previstos',s.plannedV,'planejamento'],['Carros recebidos',s.receivedV,'finalizados'],['Carros pendentes',s.pendingV,'a receber'],['Volumes previstos',s.plannedVol.toLocaleString('pt-BR'),'total'],['Volumes recebidos',s.receivedVol.toLocaleString('pt-BR'),'real'],['Volumes pendentes',s.pendingVol.toLocaleString('pt-BR'),'saldo'],['No pátio',s.patio,'aguardando'],['Em descarga',s.active,'agora'],['HC em operação',s.activeHC,'pessoas nas docas'],['Docas livres',s.free,'disponíveis'],['Docas ocupadas',s.busy,'em uso'],['Tempo médio',s.avg+' min','por carro'],['Previsão término',s.eta?Math.floor(s.eta/60)+'h '+s.eta%60+'min':'—','estimativa']];
-  const priorityBlock=session?.role==='tower'?'':`<div class="kpi priority-kpi"><small>Prioridades</small><strong>${queue.length}</strong><em>aguardando</em></div>${priorityCards()}`;
+  const priorityBlock=`<div class="kpi priority-kpi"><small>Prioridades</small><strong>${queue.length}</strong><em>aguardando</em></div>${priorityCards()}`;
   return `<div class="cards">${regular.map(x=>`<div class="kpi"><small>${x[0]}</small><strong>${x[1]}</strong><em>${x[2]}</em></div>`).join('')}${priorityBlock}</div>`;
 }
 function pageHead(title,desc,actions=''){return `<div class="page-head"><div><h2>${title}</h2><p>${desc}</p></div><div class="page-actions">${actions}</div></div>`}
@@ -1295,7 +1295,7 @@ function driverPickerDrivers(area){
  const hasPriority=d=>(state.priorities||[]).some(p=>p.status==='Aguardando'&&(sameId(p.driverId,d.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(d.plate)));
  let rows=(state.drivers||[]).filter(d=>d.status==='Ativo'&&!isActive(d));
  if(area==='patio')rows=rows.filter(d=>!isInPatio(d)&&!hasPriority(d));
- if(area==='priority')rows=rows.filter(d=>!hasPriority(d)&&!isInPatio(d)); // Uma ação operacional por motorista/placa
+ if(area==='priority')rows=rows.filter(d=>!hasPriority(d)&&isInPatio(d)); // Prioridade é uma ação sobre o motorista que já está no Pátio
  return rows.sort((a,b)=>{
   const apr=hasPriority(a),bpr=hasPriority(b);
   const ap=isInPatio(a),bp=isInPatio(b);
@@ -1402,7 +1402,7 @@ function renderOperationalPickerList(area){
  const rows=operationalPickerRows(area).filter(d=>!q||(String(d.name||'')+' '+String(d.plate||'')+' '+String(d.typology||'')+' '+String(d.horse||'')).toLowerCase().includes(q)).slice(0,100);
  list.innerHTML=rows.length?rows.map(d=>{
   const inPatio=(state.patio||[]).some(p=>sameId(p.driverId,d.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(d.plate));
-  return `<button type="button" class="driver-picker-item" data-area="${area}" data-driver-id="${esc(String(d.id))}" onpointerdown="return chooseOperationalDriver(event,this)"><b>${inPatio?'🅿️ ':''}${esc(d.name)}</b><small>${esc(d.plate)} • ${esc(d.typology)} • Cavalo ${esc(d.horse||'S/N')}</small></button>`;
+  return `<button type="button" class="driver-picker-item" data-area="${area}" data-driver-id="${esc(String(d.id))}" onclick="return chooseOperationalDriver(event,this)"><b>${inPatio?'🅿️ ':''}${esc(d.name)}</b><small>${esc(d.plate)} • ${esc(d.typology)} • Cavalo ${esc(d.horse||'S/N')}</small></button>`;
  }).join(''):`<div class="driver-picker-empty">Nenhum motorista disponível.</div>`;
 }
 function openOperationalPicker(area){
@@ -1564,7 +1564,7 @@ function renderPlanning(){
 function renderPriorities(){
  const available=state.drivers.filter(d=>d.status==='Ativo'&&driverAvailableForNewAction(d)).sort((a,b)=>a.name.localeCompare(b.name));
  return pageHead('Prioridades','Veículos prioritários.')+
- `<div class="panel"><form id="priorityForm"><div class="form-grid"><div class="full"><label>Motorista cadastrado</label>${operationalPickerHtml('priority','Pesquisar nome do motorista ou placa...')}<input id="priorityDriverValue" type="hidden" value=""><p class="small">A prioridade pode ser lançada para qualquer motorista disponível.</p></div><div><label>Placa</label><input id="prioPlate" readonly class="readonly-field" readonly></div><div><label>Cavalo</label><input id="prioHorse" readonly class="readonly-field" readonly></div><div><label>Tipologia</label><input id="prioTyp" readonly class="readonly-field" readonly></div><div><label>Quantidade prevista calculada</label><input id="prioExpectedVolumes" readonly type="number" min="0" readonly class="readonly-field"></div><div><label>Motivo (opcional)</label><input id="prioReason"></div><div class="full"><button class="btn btn-danger">Cadastrar prioridade</button></div></div></form></div>
+ `<div class="panel"><form id="priorityForm"><div class="form-grid"><div class="full"><label>Motorista cadastrado</label>${operationalPickerHtml('priority','Pesquisar nome do motorista ou placa...')}<input id="priorityDriverValue" type="hidden" value=""><p class="small">A prioridade é lançada para um motorista que já está no Pátio.</p></div><div><label>Placa</label><input id="prioPlate" readonly class="readonly-field" readonly></div><div><label>Cavalo</label><input id="prioHorse" readonly class="readonly-field" readonly></div><div><label>Tipologia</label><input id="prioTyp" readonly class="readonly-field" readonly></div><div><label>Quantidade prevista calculada</label><input id="prioExpectedVolumes" readonly type="number" min="0" readonly class="readonly-field"></div><div><label>Motivo (opcional)</label><input id="prioReason"></div><div class="full"><button class="btn btn-danger">Cadastrar prioridade</button></div></div></form></div>
  <div class="panel"><div class="table-wrap"><table><thead><tr><th>Motorista</th><th>Placa</th><th>Tipologia</th><th>Motivo</th><th>Status</th><th>Cadastro</th><th>Ação</th></tr></thead><tbody>${state.priorities.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(p=>`<tr><td>${esc(p.driverName)}</td><td>${esc(p.plate)}</td><td>${esc(p.typology)}</td><td>${esc(p.reason||'—')}</td><td><span class="badge ${p.status==='Aguardando'?'badge-red':'badge-green'}">${p.status}</span></td><td>${brDate(p.createdAt)}</td><td>${p.status==='Aguardando'?`<button class="btn btn-soft cancel-priority" data-id="${p.id}">Cancelar</button>`:'—'}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 function historyRows(){
@@ -1643,7 +1643,7 @@ function bindPage(){
     render();
   });
 
-  $('#priorityForm')?.addEventListener('submit',addPriority);refreshPriorityDriverFields();$$('.cancel-priority').forEach(b=>b.onclick=()=>{const p=state.priorities.find(x=>x.id===b.dataset.id);if(!p)return;p.status='Cancelada';p.cancelledAt=nowISO();p.updatedAt=nowISO();log('Cancelou prioridade',p.plate,false);save();render()});
+  $('#priorityForm')?.addEventListener('submit',addPriority);refreshPriorityDriverFields();$$('.cancel-priority').forEach(b=>b.onclick=async()=>{const p=state.priorities.find(x=>x.id===b.dataset.id);if(!p)return;if(!confirm('Cancelar esta prioridade?'))return;const before=cloneCRC(p);p.status='Cancelada';p.cancelledAt=nowISO();p.updatedAt=nowISO();try{await savePriorityDirect(p);log('Cancelou prioridade',p.plate,false);persistLocalSnapshot();syncBaseState=cloneCRC(state);render();toast('Prioridade cancelada e confirmada no Supabase.','ok')}catch(e){Object.assign(p,before);toast('Não foi possível cancelar a prioridade no Supabase.','error',9000)}});
   $$('.photo-btn').forEach(b=>b.onclick=()=>showHistoryPhoto(b.dataset.id,b.dataset.kind));$$('.share-history-photo').forEach(b=>b.onclick=()=>shareHistoryPhoto(b.dataset.id,b.dataset.kind));
   $('#historySearch')?.addEventListener('input',filterHistory);$('#historyOperation')?.addEventListener('change',filterHistory);$('#driversSearch')?.addEventListener('input',filterDrivers);$('#driversStatus')?.addEventListener('change',filterDrivers);
   $('#exportBtn')?.addEventListener('click',exportExcel);$('#closeTurnBtn')?.addEventListener('click',closeTurn);
@@ -1831,175 +1831,107 @@ function playCRCCompletionTone(){
  }catch(e){console.warn('CRC: som de conclusão indisponível.',e)}
 }
 
+
+async function finalizeReceivingAtomic(a,historyRecord,priorityId){
+ if(!state.settings.supabaseEnabled)return true;
+ initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
+ const histRow=cloudRowFor('history',historyRecord);
+ const {data,error}=await supabaseClient.rpc('crc_finalizar_descarregamento',{
+  p_codigo:String(a.id),
+  p_historico:histRow,
+  p_doca:String(a.dock||''),
+  p_prioridade:priorityId?String(priorityId):null,
+  p_epoch:currentCycleEpoch()
+ });
+ if(error)throw error;
+ if(data!==true)throw new Error('Supabase não confirmou a finalização atômica');
+ return true;
+}
+
 async function finishReceiving(e,id){
  e.preventDefault();
  const btn=$('#confirmFinishBtn');
  if(btn?.disabled)return;
  const originalText=btn?.textContent||'Confirmar finalização';
+
  try{
   const snapshot=getActiveVehicleSnapshot(id);
   const draft=finishDrafts[id]||{};
   draft.volumes=$('#finishVolumes')?.value??draft.volumes??0;
   draft.observation=$('#finishObs')?.value??draft.observation??'';
 
-  if(!draft.photo)
-   return toast('Tire a foto final antes de confirmar.','error');
-
-  if(state.history.some(h=>h.id===id)){
-   // Estado antigo inconsistente: o veículo já está no histórico, então remove qualquer cópia ativa fantasma.
-   const ghost=state.active.find(x=>x.id===id);
-   if(ghost){
-    state.active=state.active.filter(x=>x.id!==id);
-    state.meta=state.meta||{};state.meta.completedVehicleIds=[...new Set([...(state.meta.completedVehicleIds||[]),id])];
-    const dock=state.docks.find(d=>normalizeDockNumber(d.number)===normalizeDockNumber(ghost.dock));if(dock)dock.status='Livre';
-    save(true);
-   }
-   delete finishDrafts[id];currentFinishContext=null;closeModal();refreshUI();
-   return toast('Esse registro já estava finalizado e foi retirado da lista ativa.','ok');
-  }
+  if(!draft.photo)return toast('Tire a foto final antes de confirmar.','error');
 
   const a=snapshot||{...(currentFinishContext?.record||{}),id};
+  if(!a?.id)return toast('Não foi possível identificar o veículo.','error');
 
-  if(!a?.id)
-   return toast('Não foi possível identificar o veículo.','error');
-
-  if(btn){
-   btn.disabled=true;
-   btn.textContent='Finalizando...';
+  if(state.history.some(h=>String(h.id)===String(id))){
+   closeModal();await pullCloud(true);return toast('Este veículo já está finalizado. A tela foi atualizada.','ok');
   }
 
-  const finishedAt=nowISO(),
-        startedAt=a.startedAt||finishedAt;
+  if(btn){btn.disabled=true;btn.textContent='Finalizando...'}
 
-  const duration=Math.max(
-   1,
-   Math.round((new Date(finishedAt)-new Date(startedAt))/60000)
-  );
-
+  const finishedAt=nowISO(),startedAt=a.startedAt||finishedAt;
+  const duration=Math.max(1,Math.round((new Date(finishedAt)-new Date(startedAt))/60000));
   const historyRecord={
-   ...a,
-   id:a.id||id,
-   finishedAt,
-   durationMin:duration,
-   receivedVolumes:Number(draft.volumes||0),
-   observation:draft.observation||'',
-   endPhoto:draft.photo,
-   photoStartCode:a.photoStartCode||`INICIO-${Date.now()}`,
-   photoEndCode:`FINAL-${Date.now()}`,
-   updatedAt:finishedAt
+   ...a,id:a.id||id,finishedAt,durationMin:duration,receivedVolumes:Number(draft.volumes||0),
+   observation:draft.observation||'',endPhoto:draft.photo,
+   photoStartCode:a.photoStartCode||`INICIO-${Date.now()}`,photoEndCode:`FINAL-${Date.now()}`,updatedAt:finishedAt
   };
 
+  const priorityId=a.priorityId||state.priorities.find(p=>p.status!=='Concluída'&&(p.activeVehicleId===id||(a.plate&&normalizeDriverPlate(p.plate)===normalizeDriverPlate(a.plate))))?.id;
+
+  // PRIMEIRO o Supabase confirma toda a transação. Só depois a tela muda.
+  await finalizeReceivingAtomic(a,historyRecord,priorityId);
+
+  state.history=state.history.filter(h=>String(h.id)!==String(id));
   state.history.unshift(historyRecord);
+  state.active=state.active.filter(x=>String(x.id)!==String(id));
   state.meta=state.meta||{};
-  state.meta.completedVehicleIds=[...new Set([...(state.meta.completedVehicleIds||[]),id])];
+  state.meta.completedVehicleIds=[...new Set([...(state.meta.completedVehicleIds||[]),String(id)])];
 
-  state.active=state.active.filter(x=>x.id!==id);
-
-  const dock=state.docks.find(d=>d.number===a.dock);
-
-  if(dock)dock.status='Livre';
-
-  const priorityId=
-   a.priorityId||
-   state.priorities.find(
-    p=>
-     p.status!=='Concluída'&&
-     (
-      p.activeVehicleId===id||
-      (a.plate&&p.plate===a.plate)
-     )
-   )?.id;
+  const dock=state.docks.find(d=>normalizeDockNumber(d.number)===normalizeDockNumber(a.dock));
+  if(dock){dock.status='Livre';dock.updatedAt=finishedAt}
 
   if(priorityId){
-   const p=state.priorities.find(x=>x.id===priorityId);
-
-   if(p){
-    p.status='Concluída';
-    p.finishedAt=finishedAt;
-    p.dock=a.dock;
-    p.updatedAt=finishedAt;
-   }
+   const p=state.priorities.find(x=>String(x.id)===String(priorityId));
+   if(p){p.status='Concluída';p.finishedAt=finishedAt;p.dock=a.dock;p.updatedAt=finishedAt}
   }
 
-  delete finishDrafts[id];
+  delete finishDrafts[id];currentFinishContext=null;
+  log('Finalizou descarregamento',`${a.driverName||'Motorista'} • Doca ${a.dock||'-'} • HC ${Number(a.hc||1)} • ${duration} min`,false);
 
-  currentFinishContext=null;
+  persistLocalSnapshot();
+  syncBaseState=cloneCRC(state);
+  closeModal();refreshUI();playCRCCompletionTone();
+  toast('Veículo finalizado e confirmado no Supabase. Doca liberada.','ok');
 
-  log(
-   'Finalizou descarregamento',
-   `${a.driverName||'Motorista'} • Doca ${a.dock||'-'} • HC ${Number(a.hc||1)} • ${duration} min`,
-   false
-  );
-
-  save(false);
-  const finishConfirmed=state.settings.supabaseEnabled?await syncCloud(true):true;
-  if(!finishConfirmed)throw new Error('Supabase não confirmou a finalização');
-
-  closeModal();
-  refreshUI();
-  playCRCCompletionTone();
-  toast('Veículo finalizado, confirmado no Supabase e doca liberada.','ok');
-
-  /* ===== COMPARTILHAR FOTO FINAL ===== */
-
-  const legendaFinal=
-`✅ DESCARGA FINALIZADA
+  const legendaFinal=`✅ DESCARGA FINALIZADA
 
 Motorista: ${a.driverName}
-
 Placa: ${a.plate}
-
 Cavalo: ${a.horse}
-
 Tipologia: ${a.typology}
-
 Doca: ${a.dock}
-
 Volumes: ${historyRecord.receivedVolumes}
-
 Tempo: ${duration} min
-
 Operador: ${session.name}
-
 Data: ${new Date().toLocaleString('pt-BR')}`;
 
   setTimeout(async()=>{
-
-   if(confirm('Deseja compartilhar a Foto Final pelo WhatsApp?')){
-
-    await compartilharFotoOperacao(
-      draft.photo,
-      legendaFinal,
-      `Final_${a.plate}.jpg`
-    );
-
-   }
-
+   if(confirm('Deseja compartilhar a Foto Final pelo WhatsApp?'))
+    await compartilharFotoOperacao(draft.photo,legendaFinal,`Final_${a.plate}.jpg`);
   },300);
 
  }catch(err){
-
   console.error('Erro ao finalizar descarregamento:',err);
-
-  toast(
-   'Não foi possível finalizar. A ação não foi confirmada pelo Supabase.',
-   'error',
-   9000
-  );
-
-  try{await pullCloud(true)}catch(e){}
-
+  toast('Não foi possível finalizar: '+(err?.message||'ação não confirmada pelo Supabase.'),'error',11000);
+  try{await pullCloud(true)}catch(_){}
  }finally{
-
   const liveBtn=$('#confirmFinishBtn');
-
-  if(liveBtn){
-   liveBtn.disabled=false;
-   liveBtn.textContent=originalText;
+  if(liveBtn){liveBtn.disabled=false;liveBtn.textContent=originalText}
  }
 }
-}
-
 
 function logoutNow(reason='Saiu do sistema'){
  document.body.classList.remove('crc-panel-mode');stopPanelRotation();
@@ -2276,15 +2208,57 @@ async function closeOperationalDay(){
 let addingPlan=false;
 function addPlan(e){e.preventDefault();if(addingPlan)return;const btn=e.currentTarget?.querySelector('button[type="submit"]');const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);state.meta=state.meta||{};if(!state.meta.cyclePlanDate&&date)state.meta.cyclePlanDate=date;if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');addingPlan=true;if(btn)btn.disabled=true;try{const duplicate=state.plan.some(x=>x.date===date&&x.typology===typology&&Number(x.vehicles)===vehicles&&Number(x.volumes)===volumes&&Number(x.weight||0)===weight&&(Date.now()-new Date(x.createdAt||0).getTime())<5000);if(duplicate)return toast('Este lançamento já foi registrado.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(false);e.currentTarget.reset();$('#planDate').value=new Date().toISOString().slice(0,10);render();if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),250)}toast('Programação cadastrada.','ok')}finally{addingPlan=false;if(btn&&document.body.contains(btn))btn.disabled=false}}
 
-function addPriority(e){e.preventDefault();const driver=driverById($('#priorityDriverValue')?.value);if(!driver)return toast('Motorista não cadastrado ou inativo. Cadastre o motorista no Recebimento ou no Pátio.','error');if(driver.status!=='Ativo')return toast('Motorista inativo.','error');if((state.active||[]).some(a=>sameId(a.driverId,driver.id)||normalizeDriverPlate(a.plate)===normalizeDriverPlate(driver.plate)))return toast('Motorista já está em doca/descarregamento.','error');if((state.patio||[]).some(p=>sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate)))return toast('Este motorista/veículo já está no Pátio. Retire ou inicie o descarregamento antes de criar outra ação.','error');if((state.priorities||[]).some(p=>p.status==='Aguardando'&&(sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate))))return toast('Este motorista já está na fila de prioridade.','error');const createdAt=nowISO(),p={id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()};state.priorities.push(p);log('Cadastrou prioridade',`${p.driverName} • ${p.plate} • ${p.typology}`,false);save(true);toast(`${p.driverName} • ${p.plate} • ${p.typology}`,'priority',8000);render()}
 
-function filterDrivers(){
- const q=($('#driversSearch')?.value||'').trim().toLowerCase(),status=$('#driversStatus')?.value||'';
- $$('#driversTable tbody tr').forEach(tr=>{
-  const okText=!q||tr.innerText.toLowerCase().includes(q);
-  const cells=tr.querySelectorAll('td'),rowStatus=cells[4]?.textContent?.trim()||'';
-  tr.style.display=okText&&(!status||rowStatus===status)?'':'none';
- });
+async function savePriorityDirect(p){
+ if(!state.settings.supabaseEnabled)return true;
+ initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
+ const row=cloudRowFor('priorities',p);
+ const {error}=await supabaseClient.from(CRC_NORMALIZED_TABLES.priorities).upsert(row,{onConflict:conflictColumnFor('priorities')});
+ if(error)throw error;
+ return true;
+}
+
+async function addPriority(e){
+ e.preventDefault();
+ const btn=e.submitter||$('#priorityForm button[type="submit"]')||$('#priorityForm button');
+ if(btn?.disabled)return;
+ const driver=driverById($('#priorityDriverValue')?.value);
+ if(!driver)return toast('Selecione um motorista do Pátio.','error');
+ if(driver.status!=='Ativo')return toast('Motorista inativo.','error');
+
+ const patioRecord=(state.patio||[]).find(p=>sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate));
+ if(!patioRecord)return toast('Este motorista não está mais no Pátio. Atualize a lista e selecione novamente.','error');
+
+ if((state.active||[]).some(a=>sameId(a.driverId,driver.id)||normalizeDriverPlate(a.plate)===normalizeDriverPlate(driver.plate)))
+  return toast('Motorista já está em doca/descarregamento.','error');
+
+ if((state.priorities||[]).some(p=>p.status==='Aguardando'&&(sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate))))
+  return toast('Este motorista já está na fila de prioridade.','error');
+
+ const createdAt=nowISO();
+ const p={
+  id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,horse:driver.horse||'S/N',
+  typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,
+  reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()
+ };
+
+ if(btn){btn.disabled=true;btn.textContent='Salvando prioridade...'}
+ try{
+  await savePriorityDirect(p);
+  state.priorities.push(p);
+  log('Cadastrou prioridade',`${p.driverName} • ${p.plate} • ${p.typology}`,false);
+  persistLocalSnapshot();
+  syncBaseState=cloneCRC(state);
+  render();
+  toast(`${p.driverName} entrou na prioridade e foi confirmado no Supabase.`,'priority',8000);
+ }catch(err){
+  console.error('CRC prioridade:',err);
+  toast('A prioridade NÃO foi gravada no Supabase: '+(err?.message||err),'error',10000);
+  try{await pullCloud(true)}catch(_){}
+ }finally{
+  const live=$('#priorityForm button[type="submit"]')||$('#priorityForm button');
+  if(live){live.disabled=false;live.textContent='Cadastrar prioridade'}
+ }
 }
 
 function filterHistory(){const q=$('#historySearch').value.toLowerCase(),op=$('#historyOperation').value;$$('#historyTable tbody tr').forEach(tr=>tr.style.display=(!q||tr.innerText.toLowerCase().includes(q))&&(!op||tr.innerText.includes(op))?'':'none')}
@@ -2742,7 +2716,10 @@ function applyNormalizedRealtime(kind,payload){
  enforceDefaultAccessAndDedupe();
  persistLocalSnapshot();
  if(!syncInFlight)syncBaseState=cloneCRC(state);
- if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(30);
+ if(session){
+  if(kind==='priorities'||kind==='active'||kind==='patio'||kind==='history'||kind==='docks')scheduleVisualRefresh(20);
+  else if(!isReceivingOperationLocked())scheduleVisualRefresh(60);
+ }
 }
 let crcValidationTimer=null,crcValidationRunning=false;
 const crcValidationSeen={};
@@ -2895,7 +2872,7 @@ async function pullCloud(force=false){
    if(dockBootstrapError)throw dockBootstrapError;
   }
   next.settings={...next.settings,...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
-  next.version='13.11.0';
+  next.version='13.12.0';
   state=normalizeStateShape(next);
   enforceDefaultAccessAndDedupe();
   // Autocorreção eventual: só escreve se o banco trouxe um registro incompatível
@@ -3042,10 +3019,10 @@ function bindThemeButton(){const b=$('#themeToggleBtn');if(b&&!b.dataset.bound){
 
 document.addEventListener('visibilitychange',()=>{
  if(document.visibilityState==='hidden')stopCloudSession();
- else if(session&&navigator.onLine)startCloudSession({pull:true}).catch(()=>{});
+ else if(session&&navigator.onLine)startCloudSession({pull:(Date.now()-lastCloudActivityAt)>120000}).then(()=>validateCloudFreshness(false)).catch(()=>{});
 });
 window.addEventListener('offline',stopCloudSession);
-window.addEventListener('online',()=>{if(session&&document.visibilityState==='visible')startCloudSession({pull:true}).catch(()=>{})});
+window.addEventListener('online',()=>{if(session&&document.visibilityState==='visible')startCloudSession({pull:false}).then(()=>validateCloudFreshness(true)).catch(()=>{})});
 
 
 function crcSelfCheck(){
@@ -3103,7 +3080,7 @@ async function startCRC(){
  }
 }
 startCRC();
-// CRC V13.11: sincronização incremental inspirada no CCPB.
+// CRC V13.12: sincronização incremental inspirada no CCPB.
 // postgres_changes é a única via de tempo real; validação leve de 3 min atua somente como contingência.
 
 document.addEventListener('click',e=>{
