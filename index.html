@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.9.1 CONSISTÊNCIA + BAIXA SAÍDA</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.10.0 CICLO SOBERANO + BAIXA SAÍDA</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -455,6 +455,8 @@ const CRC_NORMALIZED_TABLES={
 // compartilham crc_veiculos e são distinguidos pelo campo _crc_kind dentro de dados.
 const CRC_CONFIG_TABLE='';
 const CRC_CONFIG_ID='principal';
+const CRC_CONTROL_TABLE='crc_controle';
+const CRC_CONTROL_ID='principal';
 const USE_NORMALIZED_SUPABASE=true;
 const CRC_VALIDATION_INTERVAL_MS=180000; // contingência: 3 min, somente se Realtime cair
 const CRC_BACKGROUND_STALE_MS=15000; // ao voltar à tela, faz só uma checagem leve
@@ -482,7 +484,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:15},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'13.9.1',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'13.10.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -779,6 +781,9 @@ function cloudFingerprint(obj){
 }
 function shouldApplyIncoming(incoming){
  if(!incoming||typeof incoming!=='object')return false;
+ const incomingReset=Number(incoming.meta?.resetEpoch||0),localReset=Number(state?.meta?.resetEpoch||0);
+ if(incomingReset>localReset)return true;
+ if(incomingReset<localReset)return false;
  const incomingTime=stateStamp(incoming),localTime=stateStamp(state);
  if(incomingTime&&localTime)return incomingTime>localTime;
  if(incomingTime&&!localTime)return true;
@@ -818,7 +823,7 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='13.9.1';
+ state.version='13.10.0';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
@@ -915,7 +920,9 @@ function applyIncomingState(incoming,force=false){
  const fingerprint=cloudFingerprint(incoming);
  if(!force&&fingerprint===lastAppliedCloudFingerprint)return false;
  if(!force&&!shouldApplyIncoming(incoming))return false;
- if(isReceivingOperationLocked()){
+ const incomingResetEpoch=Number(incoming.meta?.resetEpoch||0),localResetEpoch=Number(state?.meta?.resetEpoch||0);
+ if(incomingResetEpoch>localResetEpoch){receivingOperationLocked=false;pendingIncomingState=null}
+ else if(isReceivingOperationLocked()){
   pendingIncomingState=incoming;
   console.log('CRC: dados recebidos do Supabase e mantidos em espera até iniciar o descarregamento.');
   return true;
@@ -2219,31 +2226,17 @@ function downloadAuditPhotos(){
  const blob=new Blob([html],{type:'text/html;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=auditFileName();a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
 }
 async function closeOperationalDay(){
- if(!confirm('Finalizar este ciclo operacional? O CRC vai baixar a produção e a auditoria das fotos e depois limpar TODA a operação, mantendo motoristas, docas, tipologias e os 3 usuários.'))return;
- if(!confirm('Confirma? Previsões, pátio, prioridades, veículos em descarga, recebidos, histórico e logs serão zerados para iniciar uma nova programação.'))return;
+ if(!confirm('Finalizar este ciclo operacional? O CRC vai baixar a produção e a auditoria das fotos e DEPOIS encerrar definitivamente o ciclo.'))return;
+ if(!confirm('CONFIRMA O ENCERRAMENTO DEFINITIVO? Depois de confirmado no Supabase, nenhum aparelho poderá trazer de volta previsões, pátio, prioridades, docas em descarga, histórico ou logs deste ciclo.'))return;
  exportExcel();downloadAuditPhotos();
  await new Promise(r=>setTimeout(r,500));
  try{
-  initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
-  for(const table of ['crc_previsoes','crc_prioridades','crc_veiculos','crc_historico','crc_logs','crc_turnos']){
-   const {error}=await supabaseClient.from(table).delete().not('id','is',null);
-   if(error)throw error;
-  }
-  const stamp=nowISO();
-  state.plan=[];state.patio=[];state.active=[];state.history=[];state.priorities=[];state.logs=[];state.turns=[];
-  state.docks=uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre',updatedAt:stamp}));
-  state.meta={...(state.meta||{}),cyclePlanDate:null,updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch:Date.now(),lastEvent:null};
-  // Mantém as docas no banco e libera as que estavam ocupadas.
-  if(state.docks.length){
-   const rows=state.docks.map(d=>cloudRowFor('docks',d));
-   const {error}=await supabaseClient.from('crc_docas').upsert(rows,{onConflict:'numero'});
-   if(error)throw error;
-  }
-  localStorage.removeItem(BACKUPKEY);
-  persistLocalSnapshot();syncBaseState=cloneCRC(state);localDirty=false;render();
-  toast('Ciclo finalizado: arquivos baixados e operação zerada no CRC e no Supabase.','ok',9000);
+  const epoch=await resetOperationalCycleServer();
+  render();
+  toast(`Ciclo encerrado definitivamente (${epoch}). O CRC está pronto para uma nova previsão.`,'ok',9500);
  }catch(e){
-  toast('O Supabase não confirmou a limpeza: '+(e?.message||e),'error',11000);
+  console.error('CRC: falha no encerramento soberano.',e);
+  toast('O Supabase NÃO confirmou o encerramento. O ciclo não foi alterado: '+(e?.message||e),'error',12000);
   try{await pullCloud(true)}catch(_){}
  }
 }
@@ -2482,8 +2475,46 @@ function priorityDbStatus(status){
 function turnDbStatus(item){
  return item?.closedAt||item?.finalizado_em||String(item?.status||'').toLowerCase()==='finalizado'?'finalizado':'aberto';
 }
+
+function currentCycleEpoch(){return Math.max(0,Number(state?.meta?.resetEpoch||0))}
+function rowCycleEpoch(row){const n=Number(row?.dados?._crc_cycle_epoch||0);return Number.isFinite(n)?n:0}
+function entityMutationEpoch(item){
+ const raw=item?.updatedAt||item?.finishedAt||item?.cancelledAt||item?.attendedAt||item?.startedAt||item?.arrivedAt||item?.createdAt||0;
+ const t=Date.parse(raw)||Number(raw)||0;return Number.isFinite(t)&&t>0?t:Date.now()
+}
+async function fetchCycleControl(){
+ initSupabase();if(!supabaseClient)return {resetEpoch:currentCycleEpoch()};
+ const {data,error}=await supabaseClient.from(CRC_CONTROL_TABLE).select('reset_epoch,atualizado_em,ultimo_usuario').eq('id',CRC_CONTROL_ID).maybeSingle();
+ if(error)throw error;
+ return {resetEpoch:Number(data?.reset_epoch||0),updatedAt:data?.atualizado_em||null,user:data?.ultimo_usuario||null}
+}
+function applyCycleResetLocal(epoch,{user='Sistema',refresh=true,notify=true}={}){
+ epoch=Math.max(Number(epoch)||0,currentCycleEpoch());const stamp=nowISO();
+ state.plan=[];state.patio=[];state.active=[];state.history=[];state.priorities=[];state.logs=[];state.turns=[];
+ state.docks=uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre',updatedAt:stamp}));
+ state.meta={...(state.meta||{}),cyclePlanDate:null,updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch:epoch,lastEvent:null,
+ completedVehicleIds:[],removedPatioIds:[],resolvedPriorityIds:[],deletedPlans:[]};
+ pendingIncomingState=null;finishDrafts={};currentFinishContext=null;
+ try{localStorage.removeItem(BACKUPKEY);sessionStorage.removeItem(DBKEY)}catch(e){}
+ persistLocalSnapshot();syncBaseState=cloneCRC(state);localDirty=false;lastAppliedCloudFingerprint=cloudFingerprint(state);
+ if(refresh&&session)refreshUI(false);
+ if(notify)toast(`Novo ciclo confirmado${user&&user!=='Sistema'?' por '+user:''}. Dados do ciclo anterior foram descartados definitivamente.`,'ok',7500);
+ return true
+}
+async function resetOperationalCycleServer(){
+ initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
+ const epoch=Date.now();
+ const {data,error}=await supabaseClient.rpc('crc_reset_ciclo',{p_epoch:epoch,p_usuario:session?.name||'Sistema'});
+ if(error)throw error;
+ const confirmed=Number(data||epoch);
+ applyCycleResetLocal(confirmed,{user:session?.name||'Sistema',refresh:false,notify:false});
+ return confirmed
+}
+
 function cloudRowFor(kind,item){
  const dados=cloneCRC(item||{});
+ dados._crc_cycle_epoch=currentCycleEpoch();
+ dados._crc_entity_epoch=entityMutationEpoch(item);
  if(kind==='patio'||kind==='active')dados._crc_kind=kind;
  const code=String(item?.id||'');
  switch(kind){
@@ -2627,7 +2658,7 @@ function kindFromVehicleRow(row){
  const st=String(row?.dados?.status||'').toLowerCase();
  return st.includes('descarreg')?'active':'patio';
 }
-function stripCloudMeta(item){const x=cloneCRC(item||{});if(x&&typeof x==='object')delete x._crc_kind;return x}
+function stripCloudMeta(item){const x=cloneCRC(item||{});if(x&&typeof x==='object'){delete x._crc_kind;delete x._crc_cycle_epoch;delete x._crc_entity_epoch}return x}
 function applyNormalizedRealtime(kind,payload){
  if(!kind||!payload)return;
  const event=payload.eventType;
@@ -2640,6 +2671,9 @@ function applyNormalizedRealtime(kind,payload){
    kind=inActive&&!inPatio?'active':inPatio&&!inActive?'patio':kindFromVehicleRow(row);
   }else kind=kindFromVehicleRow(row);
  }
+ const remoteRowEpoch=rowCycleEpoch(row),localEpoch=currentCycleEpoch();
+ if(remoteRowEpoch&&remoteRowEpoch<localEpoch)return;
+ if(remoteRowEpoch>localEpoch){scheduleCloudPull(0);return}
  const item=stripCloudMeta(row?.dados||{});
  const id=String(item?.id||rawVehicleId||'');
  if(!id)return;
@@ -2709,7 +2743,14 @@ function initRealtime(){
  realtimeReady=false;
  // Uma única via de tempo real: postgres_changes. Removido Broadcast duplicado,
  // evitando que a mesma ação (e principalmente fotos) viaje duas vezes.
- let ch=supabaseClient.channel('crc-producao-v139');
+ let ch=supabaseClient.channel('crc-producao-v1310');
+ ch=ch.on('postgres_changes',{event:'*',schema:'public',table:CRC_CONTROL_TABLE,filter:`id=eq.${CRC_CONTROL_ID}`},payload=>{
+  try{
+   lastCloudActivityAt=Date.now();
+   const remoteEpoch=Number(payload.new?.reset_epoch||0),localEpoch=currentCycleEpoch();
+   if(remoteEpoch>localEpoch)applyCycleResetLocal(remoteEpoch,{user:payload.new?.ultimo_usuario||'Administrativo',refresh:true,notify:true});
+  }catch(e){console.warn('CRC: falha ao aplicar reset soberano.',e)}
+ });
  const uniqueTables=[...new Set(Object.values(CRC_NORMALIZED_TABLES))];
  uniqueTables.forEach(table=>{
   ch=ch.on('postgres_changes',{event:'*',schema:'public',table},payload=>{
@@ -2777,8 +2818,11 @@ async function pullCloud(force=false){
  if(!cloudSessionAllowed())return false;
  initSupabase();if(!supabaseClient)return false;
  try{
+  const control=await fetchCycleControl();
+  if(Number(control.resetEpoch||0)>currentCycleEpoch())applyCycleResetLocal(control.resetEpoch,{user:control.user||'Administrativo',refresh:false,notify:false});
   await bootstrapExistingDriversIfNeeded();
   const next=normalizeStateShape(cloneCRC(seed()));
+  next.meta={...(next.meta||{}),resetEpoch:Number(control.resetEpoch||currentCycleEpoch())};
   const localSettings={...(state.settings||{})};
   next.users=cloneCRC(state.users||next.users);
   next.typologies=cloneCRC(state.typologies||next.typologies);
@@ -2791,6 +2835,8 @@ async function pullCloud(force=false){
   }
   for(const [kind,table] of Object.entries(CRC_NORMALIZED_TABLES)){
    let rows=tableRows[table]||[];
+   const cycleBound=!['crc_motoristas','crc_docas'].includes(table);
+   if(cycleBound)rows=rows.filter(r=>rowCycleEpoch(r)>=Number(next.meta?.resetEpoch||0));
    if(table==='crc_veiculos')rows=rows.filter(r=>kindFromVehicleRow(r)===kind);
    const mapped=rows.map(row=>{
     const item=stripCloudMeta(row.dados||{});
@@ -2809,7 +2855,7 @@ async function pullCloud(force=false){
    if(dockBootstrapError)throw dockBootstrapError;
   }
   next.settings={...next.settings,...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
-  next.version='13.9.1';
+  next.version='13.10.0';
   state=normalizeStateShape(next);
   enforceDefaultAccessAndDedupe();
   // Autocorreção eventual: só escreve se o banco trouxe um registro incompatível
@@ -2860,9 +2906,9 @@ async function syncCloud(silent=false){
   return true;
  }catch(e){
   console.error('CRC: alteração NÃO confirmada no Supabase.',e);
-  // Se o servidor não confirmou, remove a ação local fantasma e volta à verdade oficial.
+  const stale=/CICLO_ANTIGO|ciclo anterior|epoch/i.test(String(e?.message||e));
   try{await pullCloud(true)}catch(_){}
-  if(!silent)toast('Não foi possível atualizar: '+(e?.message||e),'error',9000);
+  if(!silent)toast(stale?'Este aparelho estava em um ciclo antigo e foi atualizado para o ciclo oficial. A ação antiga NÃO foi restaurada.':'Não foi possível atualizar: '+(e?.message||e),'error',stale?9500:9000);
   return false;
  }finally{
   syncInFlight=false;
@@ -2873,35 +2919,32 @@ async function syncCloud(silent=false){
   }
  }
 }
-function restoreInternalBackup(){
+async function restoreInternalBackup(){
  const backup=readInternalBackup();
  if(!backup)return toast('Nenhum backup interno encontrado.','error');
- if(!confirm('Restaurar o último backup interno salvo neste computador?'))return;
+ try{
+  const control=navigator.onLine?await fetchCycleControl():{resetEpoch:currentCycleEpoch()};
+  const backupEpoch=Number(backup?.meta?.resetEpoch||0),officialEpoch=Math.max(Number(control.resetEpoch||0),currentCycleEpoch());
+  if(backupEpoch<officialEpoch)return toast('Este backup pertence a um ciclo anterior e foi bloqueado. Um ciclo encerrado não pode ser restaurado.','error',9500);
+ }catch(e){return toast('Não foi possível validar o backup com o ciclo oficial. Restauração bloqueada por segurança.','error',9000)}
+ if(!confirm('Restaurar o backup deste MESMO ciclo?'))return;
  state=backup;state.settings=state.settings||{};if(state.settings.autoBackup===undefined)state.settings.autoBackup=true;
- persistLocalSnapshot();refreshUI();toast('Backup interno restaurado.','ok');
+ persistLocalSnapshot();syncBaseState=cloneCRC(state);refreshUI();toast('Backup do ciclo atual restaurado.','ok');
 }
 function backupJSON(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`CRC_backup_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href)}
 function resetDemo(){if(confirm('Restaurar dados de demonstração?')){state=seed();save(false);log('Restaurou demonstração');render()}}
 async function clearAll(){
- if(!confirm('ZERAR TUDO que foi lançado? Serão apagados previsões, prioridades, recebimentos, veículos ativos e histórico. Usuários, motoristas, docas, tipologias e configurações serão mantidos. Somente os dados operacionais serão apagados.'))return;
- if(!confirm('Confirma a limpeza total dos dados operacionais? Esta ação não pode ser desfeita.'))return;
+ if(!confirm('ZERAR TODA A OPERAÇÃO? Motoristas, docas, tipologias e usuários serão mantidos.'))return;
+ if(!confirm('CONFIRMA A LIMPEZA DEFINITIVA? Após o Supabase confirmar, nenhum aparelho antigo poderá restaurar os dados apagados.'))return;
  try{
-  initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
-  for(const table of ['crc_previsoes','crc_prioridades','crc_veiculos','crc_historico','crc_logs','crc_turnos']){
-   const {error}=await supabaseClient.from(table).delete().not('id','is',null);if(error)throw error;
-  }
-  const stamp=nowISO();
-  state.plan=[];state.patio=[];state.active=[];state.history=[];state.priorities=[];state.logs=[];state.turns=[];
-  state.docks=uniqueDocks(state.docks).map(d=>({...d,status:d.status==='Bloqueada'?'Bloqueada':'Livre',updatedAt:stamp}));
-  if(state.docks.length){
-   const rows=state.docks.map(d=>cloudRowFor('docks',d));
-   const {error}=await supabaseClient.from('crc_docas').upsert(rows,{onConflict:'numero'});
-   if(error)throw error;
-  }
-  state.meta={...(state.meta||{}),updatedAt:stamp,revision:Number(state.meta?.revision||0)+1,resetEpoch:Number(state.meta?.resetEpoch||0)+1};
-  localStorage.removeItem(BACKUPKEY);persistLocalSnapshot();syncBaseState=cloneCRC(state);localDirty=false;refreshUI(false);
-  toast('Sistema operacional zerado no aparelho e no Supabase.','ok',7000);
- }catch(e){toast('Falha ao zerar o Supabase: '+(e?.message||e),'error',10000)}
+  const epoch=await resetOperationalCycleServer();
+  refreshUI(false);
+  toast(`Operação zerada definitivamente (${epoch}). Pronto para iniciar um novo ciclo.`,'ok',8500);
+ }catch(e){
+  console.error('CRC: falha na limpeza soberana.',e);
+  toast('A limpeza NÃO foi confirmada. Nada foi considerado zerado: '+(e?.message||e),'error',11000);
+  try{await pullCloud(true)}catch(_){}
+ }
 }
 
 function parseOperationalTime(value){
@@ -3018,7 +3061,7 @@ async function startCRC(){
  }
 }
 startCRC();
-// CRC V13.9: sincronização incremental inspirada no CCPB.
+// CRC V13.10: sincronização incremental inspirada no CCPB.
 // postgres_changes é a única via de tempo real; validação leve de 3 min atua somente como contingência.
 
 document.addEventListener('click',e=>{
