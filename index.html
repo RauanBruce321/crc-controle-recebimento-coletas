@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.8.0 TIMER + PRIORIDADE</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.9.1 CONSISTÊNCIA + BAIXA SAÍDA</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -444,8 +444,8 @@ body.crc-panel-mode .content{max-width:none!important;padding:18px!important;mar
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const DBKEY='crc_v1_state', BACKUPKEY='crc_v1_internal_backup', SESSION='crc_v1_session', SESSION_PERSIST='crc_v1_session_persist';
-const SUPABASE_URL='https://fftgwqcschdxczjuqfur.supabase.co';
-const SUPABASE_KEY='sb_publishable_qlEJOCL5l6Ejhz4G3iqWGQ_OZfhNpe1';
+const SUPABASE_URL='https://onjgqczptbaroecwvseq.supabase.co';
+const SUPABASE_KEY='sb_publishable_vi5Iz1frz_bpeDKav4l7Eg_V4_GnrNg';
 const CRC_NORMALIZED_TABLES={
  plan:'crc_previsoes',drivers:'crc_motoristas',docks:'crc_docas',
  patio:'crc_veiculos',active:'crc_veiculos',history:'crc_historico',priorities:'crc_prioridades',logs:'crc_logs',turns:'crc_turnos'
@@ -456,6 +456,9 @@ const CRC_NORMALIZED_TABLES={
 const CRC_CONFIG_TABLE='';
 const CRC_CONFIG_ID='principal';
 const USE_NORMALIZED_SUPABASE=true;
+const CRC_VALIDATION_INTERVAL_MS=180000; // contingência: 3 min, somente se Realtime cair
+const CRC_BACKGROUND_STALE_MS=15000; // ao voltar à tela, faz só uma checagem leve
+let lastCloudActivityAt=0;
 const nowISO=()=>new Date().toISOString(), brDate=x=>new Date(x).toLocaleString('pt-BR');
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -479,7 +482,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:15},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'13.8.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'13.9.1',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -815,14 +818,14 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='13.3';
+ state.version='13.9.1';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
  localDirty=true;
  persistLocalSnapshot();
  try{stateChannel?.postMessage({type:'state-updated',at:state.meta.updatedAt,revision:state.meta.revision})}catch(e){}
- if(sync&&state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),180)}
+ if(sync&&state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),1800)}
 }
 function saveDeferred(sync=true){
  clearTimeout(saveDeferred._t);
@@ -1210,7 +1213,7 @@ function activeCards(showFinalize=true){
  return `<div class="panel"><div class="panel-title"><h3>Veículos atuais nas docas</h3><span class="small">${state.active.length} em descarregamento</span></div><div class="vehicle-grid">${
  state.active.length?state.active.sort((a,b)=>a.dock.localeCompare(b.dock)).map(a=>{
    const started=parseOperationalTime(a.startedAt),elapsed=Number.isFinite(started)?mins(Date.now()-started):0;const pct=Math.min(100,Math.round(elapsed/a.targetMin*100));const cls=pct>=100?'over':pct>=80?'danger':pct>=50?'warn':'';
-   return `<article class="vehicle-card ${a.priority?'priority':''}" data-active="${a.id}"><div class="vc-head"><span class="badge ${a.priority?'badge-red':'badge-blue'}">${a.priority?'🚨 PRIORIDADE':'DOCA '+esc(a.dock)}</span><span class="badge badge-purple">${esc(a.operation)}</span>${['tower','receiving'].includes(session?.role)?`<div class="active-admin-wrap"><button class="active-admin-dots" type="button" data-active-dots="${a.id}" aria-label="Opções">⋯</button><div class="active-admin-popup hidden"><button type="button" data-active-edit="${a.id}">Editar</button><button type="button" class="danger" data-active-delete="${a.id}">Excluir</button></div></div>`:''}</div><div class="vc-body"><h4>${esc(a.driverName)}</h4><p>${esc(a.typology)} • ${esc(a.plate)} • Cavalo ${esc(a.horse)}</p><p><b>Previsto:</b> ${a.expectedVolumes.toLocaleString('pt-BR')} volumes • <b>HC:</b> ${Number(a.hc||1)}</p><div class="timer" data-start="${a.startedAt}">00:00:00</div><div class="progress ${cls}"><span style="width:${pct}%"></span></div><p>Meta: ${a.targetMin} min • Início: ${new Date(a.startedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p>${showFinalize&&can('admin','leader','receiving')?`<div class="card-actions"><button class="btn btn-danger finalize-btn" data-id="${a.id}">Finalizar</button><button class="btn btn-soft share-start-photo" data-id="${a.id}" title="Compartilhar início no WhatsApp" aria-label="Compartilhar início no WhatsApp"><svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M16 3a13 13 0 0 0-11.1 19.8L3 29l6.4-1.7A13 13 0 1 0 16 3Zm0 23.6c-2 0-3.9-.5-5.6-1.5l-.4-.2-3.8 1 1-3.7-.3-.4A10.6 10.6 0 1 1 16 26.6Zm5.8-7.9c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.2-.2.2-.3.2-.7.1-1.8-.9-3-1.6-4.2-3.6-.3-.5.3-.5.9-1.6.1-.2.1-.4 0-.6-.1-.2-.7-1.7-1-2.3-.3-.7-.6-.6-.8-.6h-.7c-.2 0-.6.1-.9.4-.3.3-1.2 1.2-1.2 2.9s1.2 3.3 1.4 3.6c.2.2 2.4 3.7 5.9 5.2.8.4 1.5.6 2 .7.8.3 1.6.2 2.2.1.7-.1 1.9-.8 2.2-1.5.3-.7.3-1.4.2-1.5-.1-.1-.3-.2-.6-.3Z"/></svg></button></div>`:''}</div></article>`
+   return `<article class="vehicle-card ${a.priority?'priority':''}" data-active="${a.id}"><div class="vc-head"><span class="badge ${a.priority?'badge-red':'badge-blue'}">${a.priority?'🚨 PRIORIDADE':'DOCA '+esc(a.dock)}</span><span class="badge badge-purple">${esc(a.operation)}</span>${['tower','receiving'].includes(session?.role)?`<div class="active-admin-wrap"><button class="active-admin-dots" type="button" data-active-dots="${a.id}" aria-label="Opções">⋯</button><div class="active-admin-popup hidden"><button type="button" data-active-edit="${a.id}">Editar</button><button type="button" class="danger" data-active-delete="${a.id}">Excluir</button></div></div>`:''}</div><div class="vc-body"><h4>${esc(a.driverName)}</h4><p>${esc(a.typology)} • ${esc(a.plate)} • Cavalo ${esc(a.horse)}</p><p><b>Previsto:</b> ${a.expectedVolumes.toLocaleString('pt-BR')} volumes • <b>HC:</b> ${Number(a.hc||1)}</p><div class="timer" data-start="${a.startedAt}">00:00:00</div><div class="progress ${cls}"><span style="width:${pct}%"></span></div><p>Meta: ${a.targetMin} min • Início: ${new Date(a.startedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p>${showFinalize&&can('admin','leader','receiving')?`<div class="card-actions"><button class="btn btn-primary finalize-btn" data-id="${a.id}">Finalizar</button><button class="btn btn-primary share-start-photo" data-id="${a.id}" title="Compartilhar início no WhatsApp" aria-label="Compartilhar início no WhatsApp"><svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M16 3a13 13 0 0 0-11.1 19.8L3 29l6.4-1.7A13 13 0 1 0 16 3Zm0 23.6c-2 0-3.9-.5-5.6-1.5l-.4-.2-3.8 1 1-3.7-.3-.4A10.6 10.6 0 1 1 16 26.6Zm5.8-7.9c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.2-.2.2-.3.2-.7.1-1.8-.9-3-1.6-4.2-3.6-.3-.5.3-.5.9-1.6.1-.2.1-.4 0-.6-.1-.2-.7-1.7-1-2.3-.3-.7-.6-.6-.8-.6h-.7c-.2 0-.6.1-.9.4-.3.3-1.2 1.2-1.2 2.9s1.2 3.3 1.4 3.6c.2.2 2.4 3.7 5.9 5.2.8.4 1.5.6 2 .7.8.3 1.6.2 2.2.1.7-.1 1.9-.8 2.2-1.5.3-.7.3-1.4.2-1.5-.1-.1-.3-.2-.6-.3Z"/></svg></button></div>`:''}</div></article>`
  }).join(''):`<div class="small">Nenhum veículo em descarregamento agora.</div>`}</div></div>`;
 }
 function driverMatchesAction(driver,item){
@@ -1253,7 +1256,7 @@ function driverPickerDrivers(area){
  const hasPriority=d=>(state.priorities||[]).some(p=>p.status==='Aguardando'&&(sameId(p.driverId,d.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(d.plate)));
  let rows=(state.drivers||[]).filter(d=>d.status==='Ativo'&&!isActive(d));
  if(area==='patio')rows=rows.filter(d=>!isInPatio(d)&&!hasPriority(d));
- if(area==='priority')rows=rows.filter(d=>!hasPriority(d)); // Pátio é permitido
+ if(area==='priority')rows=rows.filter(d=>!hasPriority(d)&&!isInPatio(d)); // Uma ação operacional por motorista/placa
  return rows.sort((a,b)=>{
   const apr=hasPriority(a),bpr=hasPriority(b);
   const ap=isInPatio(a),bp=isInPatio(b);
@@ -1458,7 +1461,7 @@ window.validateReceivingPriorityList=validateReceivingPriorityList;
 function renderPatio(){
  const today=localDateKey();
  const rows=state.patio.slice().sort((a,b)=>new Date(a.arrivedAt)-new Date(b.arrivedAt));
- return pageHead('Carros no Pátio','Cadastre somente os veículos que estão fisicamente no pátio.','<button class="btn btn-success" id="patioNewDriver" type="button">+ Cadastrar motorista</button><button class="btn btn-soft" id="patioEditDriver" type="button">Editar motorista</button>')+
+ return pageHead('Carros no Pátio','Cadastre somente os veículos que estão fisicamente no pátio.','<button class="btn btn-primary" id="patioNewDriver" type="button">+ Cadastrar motorista</button><button class="btn btn-primary" id="patioEditDriver" type="button">Editar motorista</button>')+
  `<div class="panel"><form id="patioForm"><div class="form-grid">
  <div class="span2"><label>MOTORISTA</label>${operationalPickerHtml('patio','Pesquisar nome do motorista ou placa...')}<input id="patioDriverValue" type="hidden" value=""></div>
  <input id="patioName" type="hidden" value="">
@@ -1484,7 +1487,7 @@ function addPatioVehicle(e){
  log('Entrada no pátio',`${name} • ${plate}`,false);save(true);render();toast('Veículo adicionado ao pátio.','ok')
 }
 function renderReceiving(){
- return pageHead('Recebimento Operacional','Selecione o motorista, confirme a doca, registre a foto e inicie a descarga.','<button class="btn btn-success" id="receivingNewDriver" type="button">+ Cadastrar motorista</button><button class="btn btn-soft" id="receivingEditDriver" type="button">Editar motorista</button><button class="btn btn-soft report-share-btn" id="sharePanelsReportBtn" type="button">📲 Compartilhar Report</button>')+
+ return pageHead('Recebimento Operacional','Selecione o motorista, confirme a doca, registre a foto e inicie a descarga.','<button class="btn btn-primary" id="receivingNewDriver" type="button">+ Cadastrar motorista</button><button class="btn btn-primary" id="receivingEditDriver" type="button">Editar motorista</button><button class="btn btn-primary report-share-btn" id="sharePanelsReportBtn" type="button">📲 Compartilhar Report</button>')+
  `<div class="receiving-priority-strip"><div class="cards"><div class="kpi priority-kpi"><small>Prioridades</small><strong>${waitingPriorities().length}</strong><em>aguardando</em></div>${priorityCards()}</div></div><div class="panel"><div class="panel-title"><h3>Iniciar descarregamento</h3><span class="small">A doca fica bloqueada até a finalização</span></div>
  <form id="startForm"><div class="receiving-form-grid">
  <div class="span2"><label>Motorista</label>${driverPickerHtml('receiving',driverPickerDrivers('receiving'),'Pesquisar nome do motorista ou placa...')}</div>
@@ -1494,7 +1497,7 @@ function renderReceiving(){
  <div><label>Doca</label><select id="dockSelect" required><option value="">Selecione...</option>${state.docks.filter(d=>d.status==='Livre').map(d=>`<option>${esc(d.number)}</option>`).join('')}</select></div>
  <div><label>Operação</label><input value="${esc(session.operation)}" class="readonly-field" readonly></div>
  <div><label>HC na doca</label><input id="hcCount" type="number" min="1" max="30" value="2" required></div>
- <div><label>Foto do veículo aberto</label><button id="openStartCameraBtn" class="btn btn-soft photo-button" type="button">📷 Abrir câmera</button><input id="startPhotoData" type="hidden"></div>
+ <div><label>Foto do veículo aberto</label><button id="openStartCameraBtn" class="btn btn-primary photo-button" type="button">📷 Abrir câmera</button><input id="startPhotoData" type="hidden"></div>
  <div class="full"><button class="btn btn-primary" type="submit">Iniciar descarregamento</button></div>
  </div></form></div>
  ${activeCards(true)}`;
@@ -1612,7 +1615,7 @@ function bindPage(){
   $('#supabaseForm')?.addEventListener('submit',saveSupabase);$('#syncNowBtn')?.addEventListener('click',()=>syncCloud(false));$('#restoreInternalBtn')?.addEventListener('click',restoreInternalBackup);
   $('#backupBtn')?.addEventListener('click',backupJSON);$('#clearAllBtn')?.addEventListener('click',clearAll);
 }
-async function fileToDataURL(file,max=800,quality=.55){
+async function fileToDataURL(file,max=720,quality=.48){
  return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>{const img=new Image();img.onload=()=>{const scale=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);resolve(c.toDataURL('image/jpeg',quality))};img.onerror=reject;img.src=r.result};r.onerror=reject;r.readAsDataURL(file)});
 }
 let startingReceiving=false;
@@ -1627,10 +1630,13 @@ async function startReceiving(e){
   const correctedPlate=normalizeDriverPlate($('#driverPlateView')?.value||driver.plate);
   const correctedHorse=normalizeDriverPlate($('#driverHorseView')?.value||driver.horse)||'S/N';
   const correctedTyp=String($('#driverTypView')?.value||driver.typology).trim();
+  if((state.active||[]).some(a=>sameId(a.driverId,driver.id)||normalizeDriverPlate(a.plate)===normalizeDriverPlate(driver.plate)))return toast('Este motorista/veículo já está em descarregamento.','error');
+  if((state.priorities||[]).some(p=>p.status==='Aguardando'&&(sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate))))return toast('Este motorista/veículo está em Prioridade. Finalize/cancele essa ação antes de iniciar outra.','error');
   if(correctedPlate && state.drivers.some(d=>d.id!==driver.id&&normalizeDriverPlate(d.plate)===correctedPlate))return toast('A placa corrigida já pertence a outro motorista.','error');
   Object.assign(driver,{plate:correctedPlate||driver.plate,horse:correctedHorse,typology:correctedTyp||driver.typology,updatedAt:nowISO()});
   state.patio.forEach(p=>{if(sameId(p.driverId,driver.id)){p.plate=driver.plate;p.horse=driver.horse;p.typology=driver.typology;p.updatedAt=nowISO();}});
-  if(state.active.some(a=>a.dock===dock)||state.docks.find(d=>d.number===dock)?.status!=='Livre')return toast('Esta doca está ocupada ou bloqueada.','error');
+  const dockNorm=normalizeDockNumber(dock);
+  if((state.active||[]).some(a=>normalizeDockNumber(a.dock)===dockNorm)||state.docks.find(d=>normalizeDockNumber(d.number)===dockNorm)?.status!=='Livre')return toast('Esta doca está ocupada ou bloqueada. Atualize a tela se necessário.','error');
   startingReceiving=true;if(submit){submit.disabled=true;submit.textContent='Iniciando...';}
   const balance=planBalance(driver.typology),target=state.typologies.find(t=>t.name===driver.typology)?.targetMin||30;
   const pr=state.priorities.find(p=>p.status==='Aguardando'&&(sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate)));
@@ -1641,7 +1647,7 @@ async function startReceiving(e){
   }
   const patioConsumed=state.patio.filter(p=>sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate));
   if(patioConsumed.length)state.meta.removedPatioIds=[...new Set([...(state.meta.removedPatioIds||[]),...patioConsumed.map(p=>p.id)])];
-  const activeId=uid();
+  const activeId=patioConsumed[0]?.id||uid();
   const sourcePatioIds=patioConsumed.map(p=>p.id);
   state.active.push({id:activeId,driverId:driver.id,driverName:driver.name,plate:driver.plate,horse:driver.horse,typology:driver.typology,dock:normalizeDockNumber(dock),operation:session.operation,expectedVolumes:balance.expected,targetMin:target,startedAt:nowISO(),startPhoto:photo,priority:!!pr,priorityId:pr?.id||null,priorityReason:pr?.reason||'',sourcePatioIds,updatedAt:nowISO(),operator:session.name,hc,alert50:false,alert80:false,alert100:false,lastOvertimeAlert:0});
   state.patio=state.patio.filter(p=>!sameId(p.driverId,driver.id)&&normalizeDriverPlate(p.plate)!==normalizeDriverPlate(driver.plate));
@@ -1768,7 +1774,7 @@ function openFinish(id){
  const draft=finishDrafts[a.id]||{volumes:'',observation:'',photo:''};
  finishDrafts[a.id]=draft;
  $('#modalBox').innerHTML=`<div class="modal-head"><h3>Finalizar — Doca ${esc(a.dock)}</h3><button class="close" type="button" onclick="closeModal()">✕</button></div><p><b>${esc(a.driverName)}</b> • ${esc(a.typology)} • ${esc(a.plate)}</p>
- <form id="finishForm"><div class="form-grid"><div><label>Volumes previstos</label><input value="${Number(a.expectedVolumes||0)}" disabled></div><div><label>Volumes recebidos</label><input id="finishVolumes" type="number" min="0" value="${esc(draft.volumes)}" required></div><div class="full"><label>Observação</label><textarea id="finishObs" rows="3">${esc(draft.observation)}</textarea></div><div class="full"><label>Foto do veículo vazio</label><button id="openFinishCameraBtn" class="btn btn-soft photo-button ${draft.photo?'photo-ready':''}" type="button">${draft.photo?'✓ Foto final registrada':'📷 Abrir câmera'}</button></div><div class="full"><button id="confirmFinishBtn" class="btn btn-danger" type="submit">Confirmar finalização</button></div></div></form>`;
+ <form id="finishForm"><div class="form-grid"><div><label>Volumes previstos</label><input value="${Number(a.expectedVolumes||0)}" disabled></div><div><label>Volumes recebidos</label><input id="finishVolumes" type="number" min="0" value="${esc(draft.volumes)}" required></div><div class="full"><label>Observação</label><textarea id="finishObs" rows="3">${esc(draft.observation)}</textarea></div><div class="full"><label>Foto do veículo vazio</label><button id="openFinishCameraBtn" class="btn btn-primary photo-button ${draft.photo?'photo-ready':''}" type="button">${draft.photo?'✓ Foto final registrada':'📷 Abrir câmera'}</button></div><div class="full"><button id="confirmFinishBtn" class="btn btn-primary" type="submit">Confirmar finalização</button></div></div></form>`;
  $('#modal').classList.remove('hidden');
  $('#openFinishCameraBtn').onclick=()=>{
    draft.volumes=$('#finishVolumes').value;
@@ -1777,6 +1783,15 @@ function openFinish(id){
  };
  $('#finishForm').onsubmit=e=>finishReceiving(e,a.id);
 }
+function playCRCCompletionTone(){
+ try{
+  const C=window.AudioContext||window.webkitAudioContext;if(!C)return;
+  const ctx=new C(),gain=ctx.createGain();gain.connect(ctx.destination);gain.gain.setValueAtTime(0.0001,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(0.12,ctx.currentTime+0.015);gain.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.42);
+  [0,0.16].forEach((d,i)=>{const o=ctx.createOscillator();o.type='sine';o.frequency.value=i?880:660;o.connect(gain);o.start(ctx.currentTime+d);o.stop(ctx.currentTime+d+0.13)});
+  setTimeout(()=>ctx.close().catch(()=>{}),700);
+ }catch(e){console.warn('CRC: som de conclusão indisponível.',e)}
+}
+
 async function finishReceiving(e,id){
  e.preventDefault();
  const btn=$('#confirmFinishBtn');
@@ -1883,6 +1898,7 @@ async function finishReceiving(e,id){
 
   closeModal();
   refreshUI();
+  playCRCCompletionTone();
   toast('Veículo finalizado, confirmado no Supabase e doca liberada.','ok');
 
   /* ===== COMPARTILHAR FOTO FINAL ===== */
@@ -2072,8 +2088,15 @@ function showPhoto(src,title){if(!src)return toast('Foto não encontrada.','erro
 
 
 function selectedDriverFromArea(area){
- const select=area==='patio'?$('#patioDriverSelect'):$('#driverSelect');
- return driverById(select?.value)
+ if(area==='patio'){
+  const id=$('#patioDriverValue')?.value||$('#patioDriverSelect')?.value||'';
+  return driverById(id);
+ }
+ if(area==='priority'){
+  const id=$('#priorityDriverValue')?.value||$('#prioDriver')?.value||'';
+  return driverById(id);
+ }
+ return driverById($('#driverSelect')?.value||'');
 }
 function openDriverManager(area='receiving',mode='new'){
  const current=mode==='edit'?selectedDriverFromArea(area):null;
@@ -2107,7 +2130,16 @@ async function saveDriverFromOperation(e){
  log(id?'Editou motorista na operação':'Cadastrou motorista na operação',`${driver.name} • ${driver.plate}`,false);
  save(true);
  closeModal();render();
- setTimeout(()=>{const select=area==='patio'?$('#patioDriverSelect'):$('#driverSelect');if(select){select.value=driver.id;select.dispatchEvent(new Event('change'))}},80);
+ setTimeout(()=>{
+  if(area==='patio'){
+   const hidden=$('#patioDriverValue');if(hidden)hidden.value=String(driver.id);
+   const label=$('#patioDriverLabel');if(label)label.textContent=`${driver.name} • ${driver.plate}`;
+   fillPatioDriverFields(driver);
+  }else{
+   const select=$('#driverSelect');
+   if(select){select.value=driver.id;select.dispatchEvent(new Event('change',{bubbles:true}))}
+  }
+ },80);
  toast(id?'Motorista atualizado.':'Motorista cadastrado e selecionado.','ok');
 }
 
@@ -2217,9 +2249,9 @@ async function closeOperationalDay(){
 }
 
 let addingPlan=false;
-function addPlan(e){e.preventDefault();if(addingPlan)return;const btn=e.currentTarget?.querySelector('button[type="submit"]');const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);state.meta=state.meta||{};if(!state.meta.cyclePlanDate&&date)state.meta.cyclePlanDate=date;if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');addingPlan=true;if(btn)btn.disabled=true;try{const duplicate=state.plan.some(x=>x.date===date&&x.typology===typology&&Number(x.vehicles)===vehicles&&Number(x.volumes)===volumes&&Number(x.weight||0)===weight&&(Date.now()-new Date(x.createdAt||0).getTime())<5000);if(duplicate)return toast('Este lançamento já foi registrado.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(false);e.currentTarget.reset();$('#planDate').value=new Date().toISOString().slice(0,10);render();if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),120)}toast('Programação cadastrada.','ok')}finally{addingPlan=false;if(btn&&document.body.contains(btn))btn.disabled=false}}
+function addPlan(e){e.preventDefault();if(addingPlan)return;const btn=e.currentTarget?.querySelector('button[type="submit"]');const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);state.meta=state.meta||{};if(!state.meta.cyclePlanDate&&date)state.meta.cyclePlanDate=date;if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');addingPlan=true;if(btn)btn.disabled=true;try{const duplicate=state.plan.some(x=>x.date===date&&x.typology===typology&&Number(x.vehicles)===vehicles&&Number(x.volumes)===volumes&&Number(x.weight||0)===weight&&(Date.now()-new Date(x.createdAt||0).getTime())<5000);if(duplicate)return toast('Este lançamento já foi registrado.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(false);e.currentTarget.reset();$('#planDate').value=new Date().toISOString().slice(0,10);render();if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),1800)}toast('Programação cadastrada.','ok')}finally{addingPlan=false;if(btn&&document.body.contains(btn))btn.disabled=false}}
 
-function addPriority(e){e.preventDefault();const driver=driverById($('#priorityDriverValue')?.value);if(!driver)return toast('Motorista não cadastrado ou inativo. Cadastre o motorista no Recebimento ou no Pátio.','error');if(driver.status!=='Ativo')return toast('Motorista inativo.','error');if((state.active||[]).some(a=>sameId(a.driverId,driver.id)||normalizeDriverPlate(a.plate)===normalizeDriverPlate(driver.plate)))return toast('Motorista já está em doca/descarregamento.','error');if((state.priorities||[]).some(p=>p.status==='Aguardando'&&(sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate))))return toast('Este motorista já está na fila de prioridade.','error');const createdAt=nowISO(),p={id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()};state.priorities.push(p);log('Cadastrou prioridade',`${p.driverName} • ${p.plate} • ${p.typology}`,false);save(true);toast(`${p.driverName} • ${p.plate} • ${p.typology}`,'priority',8000);render()}
+function addPriority(e){e.preventDefault();const driver=driverById($('#priorityDriverValue')?.value);if(!driver)return toast('Motorista não cadastrado ou inativo. Cadastre o motorista no Recebimento ou no Pátio.','error');if(driver.status!=='Ativo')return toast('Motorista inativo.','error');if((state.active||[]).some(a=>sameId(a.driverId,driver.id)||normalizeDriverPlate(a.plate)===normalizeDriverPlate(driver.plate)))return toast('Motorista já está em doca/descarregamento.','error');if((state.patio||[]).some(p=>sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate)))return toast('Este motorista/veículo já está no Pátio. Retire ou inicie o descarregamento antes de criar outra ação.','error');if((state.priorities||[]).some(p=>p.status==='Aguardando'&&(sameId(p.driverId,driver.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driver.plate))))return toast('Este motorista já está na fila de prioridade.','error');const createdAt=nowISO(),p={id:uid(),driverId:driver.id,driverName:driver.name,plate:driver.plate,typology:driver.typology,expectedVolumes:planBalance(driver.typology).expected,reason:$('#prioReason').value.trim(),status:'Aguardando',createdAt,updatedAt:createdAt,lastAlert:Date.now()};state.priorities.push(p);log('Cadastrou prioridade',`${p.driverName} • ${p.plate} • ${p.typology}`,false);save(true);toast(`${p.driverName} • ${p.plate} • ${p.typology}`,'priority',8000);render()}
 
 function filterDrivers(){
  const q=($('#driversSearch')?.value||'').trim().toLowerCase(),status=$('#driversStatus')?.value||'';
@@ -2562,7 +2594,7 @@ function cloudRowFor(kind,item){
 function conflictColumnFor(kind){
  return kind==='docks'?'numero':'codigo_cliente';
 }
-async function deleteCloudItems(kind,ids,baseState){
+async function deleteCloudItems(kind,ids,baseState,currentState=state){
  const table=CRC_NORMALIZED_TABLES[kind];
  if(!table||!ids?.length)return;
  if(kind==='docks'){
@@ -2573,12 +2605,23 @@ async function deleteCloudItems(kind,ids,baseState){
   if(error)throw error;
   return;
  }
- const {error}=await supabaseClient.from(table).delete().in('codigo_cliente',ids.map(String));
+ let deleteIds=ids.map(String);
+ if(kind==='patio'||kind==='active'){
+  // Transição Pátio -> Doca usa o MESMO codigo_cliente. Se o ID ainda existe
+  // no estado operacional atual, não apaga a linha recém-atualizada no Supabase.
+  const stillOperational=new Set([...(currentState?.patio||[]),...(currentState?.active||[])].map(x=>String(x?.id||'')).filter(Boolean));
+  deleteIds=deleteIds.filter(id=>!stillOperational.has(id));
+ }
+ if(!deleteIds.length)return;
+ const {error}=await supabaseClient.from(table).delete().in('codigo_cliente',deleteIds);
  if(error)throw error;
 }
 
 function normalizedKindFromTable(table){return Object.keys(CRC_NORMALIZED_TABLES).find(k=>CRC_NORMALIZED_TABLES[k]===table)||''}
 function kindFromVehicleRow(row){
+ const dbStatus=String(row?.status||'').toLowerCase();
+ if(dbStatus==='descarregando')return 'active';
+ if(dbStatus==='patio')return 'patio';
  const k=row?.dados?._crc_kind;
  if(k==='patio'||k==='active')return k;
  const st=String(row?.dados?.status||'').toLowerCase();
@@ -2627,16 +2670,15 @@ function applyNormalizedRealtime(kind,payload){
  if(!syncInFlight)syncBaseState=cloneCRC(state);
  if(session&&!isReceivingOperationLocked())scheduleVisualRefresh(30);
 }
-const CRC_VALIDATION_INTERVAL_MS=30000;
 let crcValidationTimer=null,crcValidationRunning=false;
 const crcValidationSeen={};
 function noteValidationStamp(table,stamp){
  const t=Date.parse(stamp||0)||0;
  if(table&&t>Number(crcValidationSeen[table]||0))crcValidationSeen[table]=t;
 }
-async function validateCloudFreshness(){
- // Igual ao CCPB: com Realtime conectado não faz polling. A validação vira apenas contingência.
- if(realtimeReady)return true;
+async function validateCloudFreshness(forceCheck=false){
+ // Com Realtime conectado não há polling contínuo. forceCheck é usado apenas ao voltar do segundo plano/online.
+ if(realtimeReady&&!forceCheck)return true;
  if(crcValidationRunning||syncInFlight||!cloudSessionAllowed())return false;
  initSupabase();if(!supabaseClient)return false;
  crcValidationRunning=true;
@@ -2665,30 +2707,29 @@ function initRealtime(){
  if(!cloudSessionAllowed())return;
  initSupabase();if(!supabaseClient||supabaseChannel)return;
  realtimeReady=false;
- // Híbrido no padrão do CCPB: Broadcast entrega o delta imediatamente; postgres_changes
- // permanece como confirmação/autoritativo, sem adicionar consultas repetitivas ao banco.
- let ch=supabaseClient.channel('crc-producao-v133',{config:{broadcast:{self:false}}})
-  .on('broadcast',{event:'crc-delta'},({payload})=>{
-   try{if(payload)applyStateDelta(payload,{refresh:true})}catch(e){console.warn('CRC: falha ao aplicar delta Broadcast.',e)}
-  });
+ // Uma única via de tempo real: postgres_changes. Removido Broadcast duplicado,
+ // evitando que a mesma ação (e principalmente fotos) viaje duas vezes.
+ let ch=supabaseClient.channel('crc-producao-v139');
  const uniqueTables=[...new Set(Object.values(CRC_NORMALIZED_TABLES))];
  uniqueTables.forEach(table=>{
   ch=ch.on('postgres_changes',{event:'*',schema:'public',table},payload=>{
    try{
+    lastCloudActivityAt=Date.now();
     const realtimeRow=payload.eventType==='DELETE'?payload.old:payload.new;
-     noteValidationStamp(table,realtimeRow?.ultima_alteracao);
-     const kind=table==='crc_veiculos'?kindFromVehicleRow(realtimeRow):normalizedKindFromTable(table);
+    noteValidationStamp(table,realtimeRow?.ultima_alteracao);
+    const kind=table==='crc_veiculos'?kindFromVehicleRow(realtimeRow):normalizedKindFromTable(table);
     applyNormalizedRealtime(kind,{...payload,table});
    }catch(e){console.warn('CRC: falha Realtime em '+table,e)}
   });
  });
  supabaseChannel=ch.subscribe(status=>{
   realtimeReady=status==='SUBSCRIBED';
+  if(status==='SUBSCRIBED')lastCloudActivityAt=Date.now();
   if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
    realtimeReady=false;
    try{supabaseClient.removeChannel(supabaseChannel)}catch(e){}
    supabaseChannel=null;
-   if(cloudSessionAllowed())setTimeout(initRealtime,2500);
+   if(cloudSessionAllowed())setTimeout(initRealtime,3500);
   }
  });
 }
@@ -2714,17 +2755,36 @@ async function repairCloudDockConsistency(rawRows,normalizedState){
  return changed.length;
 }
 
+function cloudSelectColumns(table){
+ if(table==='crc_docas')return 'numero,status,ultima_alteracao,dados';
+ if(table==='crc_veiculos')return 'codigo_cliente,status,ultima_alteracao,dados';
+ return 'codigo_cliente,ultima_alteracao,dados';
+}
+async function bootstrapExistingDriversIfNeeded(){
+ if(!supabaseClient||!Array.isArray(state.drivers)||!state.drivers.length)return false;
+ const {data,error}=await supabaseClient.from('crc_motoristas').select('codigo_cliente').limit(1);
+ if(error)throw error;
+ if(data?.length)return false;
+ const rows=state.drivers.map(d=>cloudRowFor('drivers',d));
+ if(!rows.length)return false;
+ const {error:upErr}=await supabaseClient.from('crc_motoristas').upsert(rows,{onConflict:'codigo_cliente'});
+ if(upErr)throw upErr;
+ console.info('CRC: motoristas locais migrados para o Supabase novo:',rows.length);
+ return true;
+}
+
 async function pullCloud(force=false){
  if(!cloudSessionAllowed())return false;
  initSupabase();if(!supabaseClient)return false;
  try{
+  await bootstrapExistingDriversIfNeeded();
   const next=normalizeStateShape(cloneCRC(seed()));
   const localSettings={...(state.settings||{})};
   next.users=cloneCRC(state.users||next.users);
   next.typologies=cloneCRC(state.typologies||next.typologies);
   const tableRows={};
   for(const table of [...new Set(Object.values(CRC_NORMALIZED_TABLES))]){
-   const {data,error}=await supabaseClient.from(table).select('*');
+   const {data,error}=await supabaseClient.from(table).select(cloudSelectColumns(table));
    if(error)throw error;
    tableRows[table]=data||[];
    const newest=(data||[]).reduce((m,r)=>Math.max(m,Date.parse(r?.ultima_alteracao||0)||0),0);if(newest)crcValidationSeen[table]=newest;
@@ -2749,7 +2809,7 @@ async function pullCloud(force=false){
    if(dockBootstrapError)throw dockBootstrapError;
   }
   next.settings={...next.settings,...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
-  next.version='13.8.0';
+  next.version='13.9.1';
   state=normalizeStateShape(next);
   enforceDefaultAccessAndDedupe();
   // Autocorreção eventual: só escreve se o banco trouxe um registro incompatível
@@ -2788,16 +2848,14 @@ async function syncCloud(silent=false){
   }
 
   for(const [kind,ids] of Object.entries(delta.deletes||{})){
-   await deleteCloudItems(kind,ids,beforeSync);
+   await deleteCloudItems(kind,ids,beforeSync,state);
   }
 
   state.settings.lastSync=nowISO();
   localDirty=false;
   syncBaseState=cloneCRC(state);
   persistLocalSnapshot();
-  // Depois da confirmação do Supabase, avisa os outros aparelhos com SOMENTE o delta da ação.
-  // postgres_changes continua ativo como segunda via, então perda de Broadcast não perde dados.
-  await broadcastStateDelta(delta);
+  // postgres_changes é a via única de tempo real; evita transmissão duplicada do mesmo delta.
   if(!silent)toast('Alteração confirmada no Supabase.','ok');
   return true;
  }catch(e){
@@ -2811,7 +2869,7 @@ async function syncCloud(silent=false){
   if(syncQueued){
    syncQueued=false;
    clearTimeout(syncTimer);
-   syncTimer=setTimeout(()=>syncCloud(true),300);
+   syncTimer=setTimeout(()=>syncCloud(true),1800);
   }
  }
 }
@@ -2899,10 +2957,10 @@ function bindThemeButton(){const b=$('#themeToggleBtn');if(b&&!b.dataset.bound){
 
 document.addEventListener('visibilitychange',()=>{
  if(document.visibilityState==='hidden')stopCloudSession();
- else if(session&&navigator.onLine)startCloudSession({pull:true});
+ else if(session&&navigator.onLine)startCloudSession({pull:false}).then(()=>validateCloudFreshness(true)).catch(()=>{});
 });
 window.addEventListener('offline',stopCloudSession);
-window.addEventListener('online',()=>{if(session&&document.visibilityState==='visible')startCloudSession({pull:true})});
+window.addEventListener('online',()=>{if(session&&document.visibilityState==='visible')startCloudSession({pull:false}).then(()=>validateCloudFreshness(true)).catch(()=>{})});
 
 
 function crcSelfCheck(){
@@ -2960,8 +3018,8 @@ async function startCRC(){
  }
 }
 startCRC();
-// CRC V13.3: sincronização híbrida inspirada no CCPB.
-// Broadcast envia apenas o delta confirmado; postgres_changes confirma a alteração; validação de 30s só atua se o Realtime cair.
+// CRC V13.9: sincronização incremental inspirada no CCPB.
+// postgres_changes é a única via de tempo real; validação leve de 3 min atua somente como contingência.
 
 document.addEventListener('click',e=>{
  const logout=e.target.closest('#logoutBtn');
@@ -2975,7 +3033,7 @@ document.addEventListener('submit',e=>{
  setTimeout(()=>{if(f)f.dataset.submitting='0'},900);
 },true);
 
-// V13.2: sem polling. Realtime PostgreSQL mantém os aparelhos online; ao voltar do segundo plano ou tocar ↻, faz uma carga oficial única.
+// V13.9: sem polling contínuo. Ao voltar do segundo plano faz só uma checagem leve; carga completa apenas quando necessário.
 </script>
 
 
