@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.13.0 FLUXO PRIORIDADE + AÇÕES ATÔMICAS</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.14.0 NO-SHOW + EGRESS DE IMAGENS</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -488,12 +488,13 @@ function seed(){
   ];
   const typologies=[
     {name:'Fiorino',targetMin:20},{name:'VAN',targetMin:25},{name:'VUC',targetMin:30},
-    {name:'3/4',targetMin:40},{name:'TOCO',targetMin:50},{name:'TRUCK',targetMin:70},{name:'Carreta',targetMin:90}
+    {name:'3/4',targetMin:40},{name:'TOCO',targetMin:50},{name:'TRUCK',targetMin:70},{name:'Carreta',targetMin:90},
+    {name:'HR',targetMin:30}
   ];
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:15},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'13.13.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'13.14.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -577,6 +578,7 @@ function uniqueDocks(docks=[]){
 function normalizeStateShape(target){
  target=target&&typeof target==='object'?target:seed();
  ['users','typologies','plan','drivers','docks','patio','active','history','priorities','logs','turns'].forEach(k=>{if(!Array.isArray(target[k]))target[k]=[]});
+ if(!target.typologies.some(t=>String(t?.name||'').trim().toUpperCase()==='HR'))target.typologies.push({name:'HR',targetMin:30});
  target.docks=uniqueDocks(target.docks);
  // CRC V13.5: garante as 15 docas operacionais sem apagar configurações existentes.
  const dockByNumber=new Map(target.docks.map(d=>[normalizeDockNumber(d.number),d]));
@@ -847,7 +849,7 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='13.13.0';
+ state.version='13.14.0';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
@@ -1038,6 +1040,9 @@ function showCRCToast(message,type='ok',duration=4200){
 
 function toast(message,type='ok',duration=4200){
  const host=$('#toasts');if(!host)return;
+ // Durante a operação, notificações visuais ficam somente no Administrativo.
+ // Antes do login, mensagens de acesso continuam disponíveis.
+ if(session&&session.role!=='tower')return;
  if(host.querySelectorAll('.toast').length>=CRC_MAX_VISIBLE_TOASTS){
   crcToastQueue.push({message,type,duration});
   if(crcToastQueue.length>20)crcToastQueue.splice(0,crcToastQueue.length-20);
@@ -1211,9 +1216,22 @@ function currentNoShowRows(){
   return {name,planned,completed,noShow,pct,plannedVls,receivedVls,noShowVls,pctVls};
  }).filter(r=>r.planned>0||r.completed>0||r.plannedVls>0||r.receivedVls>0);
 }
+function currentNoShowTotals(rows=currentNoShowRows()){
+ const planned=rows.reduce((sum,r)=>sum+Number(r.planned||0),0);
+ const completed=rows.reduce((sum,r)=>sum+Number(r.completed||0),0);
+ const noShow=Math.max(0,planned-completed);
+ const pct=planned?Math.round(noShow/planned*100):0;
+ const plannedVls=rows.reduce((sum,r)=>sum+Number(r.plannedVls||0),0);
+ const receivedVls=rows.reduce((sum,r)=>sum+Number(r.receivedVls||0),0);
+ const noShowVls=Math.max(0,plannedVls-receivedVls);
+ const pctVls=plannedVls?Math.round(noShowVls/plannedVls*100):0;
+ return {name:'TOTAL',planned,completed,noShow,pct,plannedVls,receivedVls,noShowVls,pctVls};
+}
 function noShowPanel(){
- const cycleDate=operationalPlanDate(),rows=currentNoShowRows();
- return `<div class="panel no-show-panel"><div class="panel-title"><h3>No-show por tipologia — ciclo ${esc(cycleDate)}</h3></div><div class="table-wrap"><table><thead><tr><th>Tipologia</th><th>Previsto</th><th>Concluído</th><th>No-show</th><th>% No-show</th><th>VLS Prev.</th><th>VLS Rec.</th><th>VLS No-show</th><th>% VLS</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td><b>${esc(r.name)}</b></td><td><span class="ns-neutral">${r.planned}</span></td><td><span class="${r.completed>=r.planned&&r.planned?'ns-good':'ns-neutral'}">${r.completed}</span></td><td><span class="${r.noShow>0?'ns-bad':'ns-good'}">${r.noShow}</span></td><td><span class="${r.pct>0?'ns-bad':'ns-good'}">${r.pct}%</span></td><td><span class="ns-neutral">${r.plannedVls.toLocaleString('pt-BR')}</span></td><td><span class="${r.receivedVls>=r.plannedVls&&r.plannedVls?'ns-good':'ns-neutral'}">${r.receivedVls.toLocaleString('pt-BR')}</span></td><td><span class="${r.noShowVls>0?'ns-bad':'ns-good'}">${r.noShowVls.toLocaleString('pt-BR')}</span></td><td><span class="${r.pctVls>0?'ns-bad':'ns-good'}">${r.pctVls}%</span></td></tr>`).join(''):`<tr><td colspan="9" class="small">Nenhuma previsão lançada para o ciclo atual.</td></tr>`}</tbody></table></div></div>`;
+ const cycleDate=operationalPlanDate(),rows=currentNoShowRows(),t=currentNoShowTotals(rows);
+ const body=rows.length?rows.map(r=>`<tr><td><b>${esc(r.name)}</b></td><td><span class="ns-neutral">${r.planned}</span></td><td><span class="${r.completed>=r.planned&&r.planned?'ns-good':'ns-neutral'}">${r.completed}</span></td><td><span class="${r.noShow>0?'ns-bad':'ns-good'}">${r.noShow}</span></td><td><span class="${r.pct>0?'ns-bad':'ns-good'}">${r.pct}%</span></td><td><span class="ns-neutral">${r.plannedVls.toLocaleString('pt-BR')}</span></td><td><span class="${r.receivedVls>=r.plannedVls&&r.plannedVls?'ns-good':'ns-neutral'}">${r.receivedVls.toLocaleString('pt-BR')}</span></td><td><span class="${r.noShowVls>0?'ns-bad':'ns-good'}">${r.noShowVls.toLocaleString('pt-BR')}</span></td><td><span class="${r.pctVls>0?'ns-bad':'ns-good'}">${r.pctVls}%</span></td></tr>`).join(''):`<tr><td colspan="9" class="small">Nenhuma previsão lançada para o ciclo atual.</td></tr>`;
+ const total=rows.length?`<tfoot><tr style="background:#eef3fb;border-top:2px solid #b9c6dc"><td><b>TOTAL</b></td><td><b>${t.planned}</b></td><td><b>${t.completed}</b></td><td><span class="${t.noShow>0?'ns-bad':'ns-good'}"><b>${t.noShow}</b></span></td><td><span class="${t.pct>0?'ns-bad':'ns-good'}"><b>${t.pct}%</b></span></td><td><b>${t.plannedVls.toLocaleString('pt-BR')}</b></td><td><b>${t.receivedVls.toLocaleString('pt-BR')}</b></td><td><span class="${t.noShowVls>0?'ns-bad':'ns-good'}"><b>${t.noShowVls.toLocaleString('pt-BR')}</b></span></td><td><span class="${t.pctVls>0?'ns-bad':'ns-good'}"><b>${t.pctVls}%</b></span></td></tr></tfoot>`:'';
+ return `<div class="panel no-show-panel"><div class="panel-title"><h3>No-show por tipologia — ciclo ${esc(cycleDate)}</h3></div><div class="table-wrap"><table><thead><tr><th>Tipologia</th><th>Previsto</th><th>Concluído</th><th>No-show</th><th>% No-show</th><th>VLS Prev.</th><th>VLS Rec.</th><th>VLS No-show</th><th>% VLS</th></tr></thead><tbody>${body}</tbody>${total}</table></div></div>`;
 }
 function renderDashboard(){
  return pageHead('Painel Geral','Visão consolidada de todas as operações.') + kpis()+dockPanel()+activeCards(false)+noShowPanel();
@@ -1680,7 +1698,7 @@ function bindPage(){
   $('#supabaseForm')?.addEventListener('submit',saveSupabase);$('#syncNowBtn')?.addEventListener('click',()=>syncCloud(false));$('#restoreInternalBtn')?.addEventListener('click',restoreInternalBackup);
   $('#backupBtn')?.addEventListener('click',backupJSON);$('#clearAllBtn')?.addEventListener('click',clearAll);
 }
-async function fileToDataURL(file,max=720,quality=.48){
+async function fileToDataURL(file,max=420,quality=.30){
  return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>{const img=new Image();img.onload=()=>{const scale=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);resolve(c.toDataURL('image/jpeg',quality))};img.onerror=reject;img.src=r.result};r.onerror=reject;r.readAsDataURL(file)});
 }
 let startingReceiving=false;
@@ -2207,12 +2225,19 @@ function reportCanvas(){
 
  // Painel 3 - no-show
  box(35,1125,1130,620,'3. No-show • Ciclo '+operationalPlanDate());
- const rows=currentNoShowRows().slice(0,12);
- x.font='bold 14px Arial';x.fillStyle='#10204b';
- const cols=[55,330,445,550,665,790,930,1050],heads=['Tipologia','Prev.','Concl.','No-show','VLS Prev.','VLS Rec.','VLS NS','%'];
+ const rows=currentNoShowRows().slice(0,12),tot=currentNoShowTotals(currentNoShowRows());
+ x.font='bold 13px Arial';x.fillStyle='#10204b';
+ const cols=[55,275,365,455,545,650,780,910,1040],heads=['Tipologia','Prev.','Concl.','No-show','% NS','VLS Prev.','VLS Rec.','VLS NS','% VLS'];
  heads.forEach((h,i)=>x.fillText(h,cols[i],1185));
- x.font='14px Arial';
- rows.forEach((r,i)=>{const y=1220+i*40;x.fillStyle=i%2?'#f8fafc':'#fff';x.fillRect(50,y-24,1095,36);x.fillStyle='#1e293b';const vals=[r.name,r.planned,r.completed,r.noShow,r.plannedVls,r.receivedVls,r.noShowVls,r.pctVls+'%'];vals.forEach((v,j)=>x.fillText(String(v).slice(0,j===0?30:12),cols[j],y))});
+ x.font='13px Arial';
+ rows.forEach((r,i)=>{const y=1220+i*40;x.fillStyle=i%2?'#f8fafc':'#fff';x.fillRect(50,y-24,1095,36);x.fillStyle='#1e293b';const vals=[r.name,r.planned,r.completed,r.noShow,r.pct+'%',r.plannedVls,r.receivedVls,r.noShowVls,r.pctVls+'%'];vals.forEach((v,j)=>x.fillText(String(v).slice(0,j===0?25:12),cols[j],y))});
+ if(rows.length){
+  const y=1220+rows.length*40;
+  x.fillStyle='#e8eef8';x.fillRect(50,y-24,1095,38);
+  x.fillStyle='#10204b';x.font='bold 13px Arial';
+  const vals=['TOTAL',tot.planned,tot.completed,tot.noShow,tot.pct+'%',tot.plannedVls,tot.receivedVls,tot.noShowVls,tot.pctVls+'%'];
+  vals.forEach((v,j)=>x.fillText(String(v).slice(0,j===0?25:12),cols[j],y));
+ }
  return c;
 }
 async function sharePanelsReport(){
@@ -2931,7 +2956,7 @@ async function pullCloud(force=false){
    if(dockBootstrapError)throw dockBootstrapError;
   }
   next.settings={...next.settings,...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
-  next.version='13.13.0';
+  next.version='13.14.0';
   state=normalizeStateShape(next);
   enforceDefaultAccessAndDedupe();
   // Autocorreção eventual: só escreve se o banco trouxe um registro incompatível
