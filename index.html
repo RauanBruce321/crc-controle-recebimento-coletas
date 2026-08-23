@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.14.2 ALINHAMENTO NO-SHOW</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.15.0 NO-SHOW MANUAL + FOTOS SOB DEMANDA</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -130,6 +130,9 @@ th{background:#f6f8fb;color:#596174;position:sticky;top:0}
   .content{padding:12px}.cards{grid-template-columns:repeat(2,1fr)}.grid-3,.form-grid{grid-template-columns:1fr}
   .form-grid .full{grid-column:auto}.top-title span,.user-pill .user-name{display:none}
 }
+
+.kpi-noshow-minus{position:absolute;top:14px;right:16px;color:#dc2626;font-weight:900;font-size:16px;line-height:1}
+@media(max-width:640px){.kpi-noshow-minus{top:12px;right:12px;font-size:14px}}
 </style>
 
 <style id="ccpb-layout-override">
@@ -463,6 +466,7 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const DBKEY='crc_v1_state', BACKUPKEY='crc_v1_internal_backup', SESSION='crc_v1_session', SESSION_PERSIST='crc_v1_session_persist';
 const SUPABASE_URL='https://onjgqczptbaroecwvseq.supabase.co';
 const SUPABASE_KEY='sb_publishable_vi5Iz1frz_bpeDKav4l7Eg_V4_GnrNg';
+const CRC_PHOTO_BUCKET='crc-fotos';
 const CRC_NORMALIZED_TABLES={
  plan:'crc_previsoes',drivers:'crc_motoristas',docks:'crc_docas',
  patio:'crc_veiculos',active:'crc_veiculos',history:'crc_historico',priorities:'crc_prioridades',logs:'crc_logs',turns:'crc_turnos'
@@ -502,7 +506,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:15},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'13.14.2',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'13.15.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -1103,19 +1107,73 @@ function renderNav(){
   $('#mainNav').innerHTML=navItems.filter(x=>isVisible(x[0])).map(([id,ic,tx])=>`<button data-page="${id}" class="${currentPage===id?'active':''}"><span class="nav-icon">${ic}</span><span class="nav-text">${tx}</span></button>`).join('');
   $('#mainNav').onclick=e=>{const b=e.target.closest('button[data-page]');if(b){const nextPage=b.dataset.page;if(currentPage==='receiving'&&nextPage!=='receiving'&&receivingOperationLocked)unlockReceivingOperation({applyPending:true,refresh:false});currentPage=nextPage;render()}};
 }
+
+const CRC_NO_SHOW_ADJUSTMENT_TYPE='__CRC_NO_SHOW_AJUSTE__';
+function isManualNoShowRow(p){return !!p&&(p.isNoShowAdjustment===true||p.typology===CRC_NO_SHOW_ADJUSTMENT_TYPE)}
+function operationalPlanRows(){return (state.plan||[]).filter(p=>!isManualNoShowRow(p))}
+function manualNoShowRecord(){
+ const date=operationalPlanDate();
+ return (state.plan||[]).find(p=>isManualNoShowRow(p)&&(!p.date||p.date===date))||null;
+}
+function manualNoShowAdjustment(){
+ const p=manualNoShowRecord();
+ return {
+  vehicles:Math.max(0,Number(p?.noShowVehicles||0)),
+  volumes:Math.max(0,Number(p?.noShowVolumes||0))
+ };
+}
+function originalPlanTotals(){
+ const plan=operationalPlanRows();
+ return {
+  vehicles:plan.reduce((a,b)=>a+Number(b.vehicles||0),0),
+  volumes:plan.reduce((a,b)=>a+Number(b.volumes||0),0)
+ };
+}
+async function applyManualNoShow(e){
+ e.preventDefault();
+ const original=originalPlanTotals();
+ if(original.vehicles<=0&&original.volumes<=0)return toast('Lance a previsão antes de aplicar o No-show.','error');
+ let vehicles=Math.max(0,Math.floor(Number($('#manualNoShowVehicles')?.value||0)));
+ let volumes=Math.max(0,Math.floor(Number($('#manualNoShowVolumes')?.value||0)));
+ if(vehicles>original.vehicles)return toast(`O No-show de carros não pode ultrapassar a previsão original de ${original.vehicles}.`,'error');
+ if(volumes>original.volumes)return toast(`O No-show de volumes não pode ultrapassar a previsão original de ${original.volumes.toLocaleString('pt-BR')}.`,'error');
+ const now=nowISO(),date=operationalPlanDate();
+ let row=manualNoShowRecord();
+ if(!row){
+  row={id:uid(),date,typology:CRC_NO_SHOW_ADJUSTMENT_TYPE,vehicles:0,volumes:0,weight:0,isNoShowAdjustment:true,createdAt:now,updatedAt:now,noShowVehicles:0,noShowVolumes:0};
+  state.plan.push(row);
+ }
+ Object.assign(row,{date,isNoShowAdjustment:true,noShowVehicles:vehicles,noShowVolumes:volumes,updatedAt:now});
+ log('Atualizou No-show operacional',`${vehicles} carros • ${volumes} volumes`,false);
+ save(false);render();
+ if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),250)}
+ toast('No-show operacional atualizado.','ok');
+}
+
 function stats(){
- const today=localDateKey();
- const plan=state.plan;
+ const plan=operationalPlanRows();
  const history=state.history;
  const active=state.active;
  const patio=state.patio;
- const plannedV=plan.reduce((a,b)=>a+Number(b.vehicles||0),0),plannedVol=plan.reduce((a,b)=>a+Number(b.volumes||0),0);
+ const originalPlannedV=plan.reduce((a,b)=>a+Number(b.vehicles||0),0);
+ const originalPlannedVol=plan.reduce((a,b)=>a+Number(b.volumes||0),0);
+ const adj=manualNoShowAdjustment();
+ const noShowAdjV=Math.min(originalPlannedV,Math.max(0,Number(adj.vehicles||0)));
+ const noShowAdjVol=Math.min(originalPlannedVol,Math.max(0,Number(adj.volumes||0)));
+ const plannedV=Math.max(0,originalPlannedV-noShowAdjV);
+ const plannedVol=Math.max(0,originalPlannedVol-noShowAdjVol);
  const receivedV=history.length,receivedVol=history.reduce((a,b)=>a+Number(b.receivedVolumes||0),0);
  const avg=history.length?Math.round(history.reduce((a,b)=>a+Number(b.durationMin||0),0)/history.length):0;
  const rate=history.length?receivedVol/Math.max(1,history.reduce((a,b)=>a+Number(b.durationMin||0),0)):0;
  const remaining=Math.max(0,plannedVol-receivedVol),eta=rate?Math.round(remaining/rate):0;
  const activeHC=active.reduce((a,b)=>a+Number(b.hc||0),0);
- return {plannedV,plannedVol,receivedV,receivedVol,pendingV:Math.max(0,plannedV-receivedV),pendingVol:remaining,active:active.length,patio:patio.length,activeHC,avg,eta,free:state.docks.filter(d=>d.status==='Livre').length,busy:state.docks.filter(d=>d.status==='Ocupada').length};
+ return {
+  plannedV,plannedVol,originalPlannedV,originalPlannedVol,noShowAdjV,noShowAdjVol,
+  receivedV,receivedVol,pendingV:Math.max(0,plannedV-receivedV),pendingVol:remaining,
+  active:active.length,patio:patio.length,activeHC,avg,eta,
+  free:state.docks.filter(d=>d.status==='Livre').length,
+  busy:state.docks.filter(d=>d.status==='Ocupada').length
+ };
 }
 function waitingPriorities(){
  return state.priorities.filter(p=>p.status==='Aguardando').sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
@@ -1126,9 +1184,23 @@ function priorityCards(){
 }
 function kpis(){
   const s=stats(),queue=waitingPriorities();
-  const regular=[['Carros previstos',s.plannedV,'planejamento'],['Carros recebidos',s.receivedV,'finalizados'],['Carros pendentes',s.pendingV,'a receber'],['Volumes previstos',s.plannedVol.toLocaleString('pt-BR'),'total'],['Volumes recebidos',s.receivedVol.toLocaleString('pt-BR'),'real'],['Volumes pendentes',s.pendingVol.toLocaleString('pt-BR'),'saldo'],['No pátio',s.patio,'aguardando'],['Em descarga',s.active,'agora'],['HC em operação',s.activeHC,'pessoas nas docas'],['Docas livres',s.free,'disponíveis'],['Docas ocupadas',s.busy,'em uso'],['Tempo médio',s.avg+' min','por carro'],['Previsão término',s.eta?Math.floor(s.eta/60)+'h '+s.eta%60+'min':'—','estimativa']];
+  const regular=[
+   {label:'Carros previstos',value:s.plannedV,sub:'planejamento',minus:s.noShowAdjV},
+   {label:'Carros recebidos',value:s.receivedV,sub:'finalizados'},
+   {label:'Carros pendentes',value:s.pendingV,sub:'a receber'},
+   {label:'Volumes previstos',value:s.plannedVol.toLocaleString('pt-BR'),sub:'total',minus:s.noShowAdjVol},
+   {label:'Volumes recebidos',value:s.receivedVol.toLocaleString('pt-BR'),sub:'real'},
+   {label:'Volumes pendentes',value:s.pendingVol.toLocaleString('pt-BR'),sub:'saldo'},
+   {label:'No pátio',value:s.patio,sub:'aguardando'},
+   {label:'Em descarga',value:s.active,sub:'agora'},
+   {label:'HC em operação',value:s.activeHC,sub:'pessoas nas docas'},
+   {label:'Docas livres',value:s.free,sub:'disponíveis'},
+   {label:'Docas ocupadas',value:s.busy,sub:'em uso'},
+   {label:'Tempo médio',value:s.avg+' min',sub:'por carro'},
+   {label:'Previsão término',value:s.eta?Math.floor(s.eta/60)+'h '+s.eta%60+'min':'—',sub:'estimativa'}
+  ];
   const priorityBlock=`<div class="kpi priority-kpi"><small>Prioridades</small><strong>${queue.length}</strong><em>aguardando</em></div>${priorityCards()}`;
-  return `<div class="cards">${regular.map(x=>`<div class="kpi"><small>${x[0]}</small><strong>${x[1]}</strong><em>${x[2]}</em></div>`).join('')}${priorityBlock}</div>`;
+  return `<div class="cards">${regular.map(x=>`<div class="kpi" style="position:relative"><small>${x.label}</small>${x.minus>0?`<span class="kpi-noshow-minus">− ${Number(x.minus).toLocaleString('pt-BR')}</span>`:''}<strong>${x.value}</strong><em>${x.sub}</em></div>`).join('')}${priorityBlock}</div>`;
 }
 function pageHead(title,desc,actions=''){return `<div class="page-head"><div><h2>${title}</h2><p>${desc}</p></div><div class="page-actions">${actions}</div></div>`}
 
@@ -1143,8 +1215,23 @@ function ensurePanelRotation(){
 }
 function panelTVKpis(){
  const s=stats(),queue=waitingPriorities();
- const items=[['Carros previstos',s.plannedV,'planejamento'],['Carros recebidos',s.receivedV,'finalizados'],['Carros pendentes',s.pendingV,'a receber'],['No pátio',s.patio,'aguardando'],['Em descarga',s.active,'agora'],['HC em operação',s.activeHC,'nas docas'],['Docas livres',s.free,'disponíveis'],['Docas ocupadas',s.busy,'em uso'],['Volumes previstos',s.plannedVol.toLocaleString('pt-BR'),'total'],['Volumes recebidos',s.receivedVol.toLocaleString('pt-BR'),'real'],['Volumes pendentes',s.pendingVol.toLocaleString('pt-BR'),'saldo'],['Prioridades',queue.length,'aguardando'],['Tempo médio',s.avg+' min','por carro'],['Previsão término',s.eta?Math.floor(s.eta/60)+'h '+s.eta%60+'min':'—','estimativa']];
- return `<div class="cards">${items.map(x=>`<div class="kpi"><small>${x[0]}</small><strong>${x[1]}</strong><em>${x[2]}</em></div>`).join('')}</div>`;
+ const items=[
+  {label:'Carros previstos',value:s.plannedV,sub:'planejamento',minus:s.noShowAdjV},
+  {label:'Carros recebidos',value:s.receivedV,sub:'finalizados'},
+  {label:'Carros pendentes',value:s.pendingV,sub:'a receber'},
+  {label:'No pátio',value:s.patio,sub:'aguardando'},
+  {label:'Em descarga',value:s.active,sub:'agora'},
+  {label:'HC em operação',value:s.activeHC,sub:'nas docas'},
+  {label:'Docas livres',value:s.free,sub:'disponíveis'},
+  {label:'Docas ocupadas',value:s.busy,sub:'em uso'},
+  {label:'Volumes previstos',value:s.plannedVol.toLocaleString('pt-BR'),sub:'total',minus:s.noShowAdjVol},
+  {label:'Volumes recebidos',value:s.receivedVol.toLocaleString('pt-BR'),sub:'real'},
+  {label:'Volumes pendentes',value:s.pendingVol.toLocaleString('pt-BR'),sub:'saldo'},
+  {label:'Prioridades',value:queue.length,sub:'aguardando'},
+  {label:'Tempo médio',value:s.avg+' min',sub:'por carro'},
+  {label:'Previsão término',value:s.eta?Math.floor(s.eta/60)+'h '+s.eta%60+'min':'—',sub:'estimativa'}
+ ];
+ return `<div class="cards">${items.map(x=>`<div class="kpi" style="position:relative"><small>${x.label}</small>${x.minus>0?`<span class="kpi-noshow-minus">− ${Number(x.minus).toLocaleString('pt-BR')}</span>`:''}<strong>${x.value}</strong><em>${x.sub}</em></div>`).join('')}</div>`;
 }
 
 function panelDockOverviewTV(){
@@ -1211,20 +1298,20 @@ function localDateKey(value){
  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 function operationalPlanDate(){
- if(state.meta?.cyclePlanDate&&state.plan.some(p=>p.date===state.meta.cyclePlanDate))return state.meta.cyclePlanDate;
- const dates=[...new Set((state.plan||[]).map(p=>p.date).filter(Boolean))].sort();
+ if(state.meta?.cyclePlanDate&&operationalPlanRows().some(p=>p.date===state.meta.cyclePlanDate))return state.meta.cyclePlanDate;
+ const dates=[...new Set(operationalPlanRows().map(p=>p.date).filter(Boolean))].sort();
  const date=dates[0]||localDateKey();
  state.meta=state.meta||{};if(dates.length)state.meta.cyclePlanDate=date;
  return date;
 }
 function currentNoShowRows(){
  const cycleDate=operationalPlanDate();
- const names=[...new Set([...state.typologies.map(t=>t.name),...state.plan.filter(p=>p.date===cycleDate).map(p=>p.typology)])];
+ const names=[...new Set([...state.typologies.map(t=>t.name),...operationalPlanRows().filter(p=>p.date===cycleDate).map(p=>p.typology)])];
  return names.map(name=>{
-  const planned=state.plan.filter(p=>p.date===cycleDate&&p.typology===name).reduce((sum,p)=>sum+Number(p.vehicles||0),0);
+  const planned=operationalPlanRows().filter(p=>p.date===cycleDate&&p.typology===name).reduce((sum,p)=>sum+Number(p.vehicles||0),0);
   const completed=state.history.filter(h=>h.typology===name).length;
   const noShow=Math.max(0,planned-completed),pct=planned?Math.round(noShow/planned*100):0;
-  const plannedVls=state.plan.filter(p=>p.date===cycleDate&&p.typology===name).reduce((sum,p)=>sum+Number(p.volumes||0),0);
+  const plannedVls=operationalPlanRows().filter(p=>p.date===cycleDate&&p.typology===name).reduce((sum,p)=>sum+Number(p.volumes||0),0);
   const receivedVls=state.history.filter(h=>h.typology===name).reduce((sum,h)=>sum+Number(h.receivedVolumes||h.volumes||0),0);
   const noShowVls=Math.max(0,plannedVls-receivedVls),pctVls=plannedVls?Math.round(noShowVls/plannedVls*100):0;
   return {name,planned,completed,noShow,pct,plannedVls,receivedVls,noShowVls,pctVls};
@@ -1600,16 +1687,23 @@ function renderReceiving(){
  ${activeCards(true)}`;
 }
 function planBalance(typology){
- const p=state.plan.filter(x=>x.typology===typology).reduce((a,b)=>({vehicles:a.vehicles+b.vehicles,volumes:a.volumes+b.volumes,weight:a.weight+b.weight}),{vehicles:0,volumes:0,weight:0});
+ const p=operationalPlanRows().filter(x=>x.typology===typology).reduce((a,b)=>({vehicles:a.vehicles+b.vehicles,volumes:a.volumes+b.volumes,weight:a.weight+b.weight}),{vehicles:0,volumes:0,weight:0});
  const done=state.history.filter(x=>x.typology===typology).length+state.active.filter(x=>x.typology===typology).length;
  const used=state.history.filter(x=>x.typology===typology).reduce((a,b)=>a+b.receivedVolumes,0)+state.active.filter(x=>x.typology===typology).reduce((a,b)=>a+b.expectedVolumes,0);
  const remV=Math.max(0,p.vehicles-done),remVol=Math.max(0,p.volumes-used);
  return {expected:p.vehicles<=0?0:(remV?Math.max(0,Math.round(remVol/remV)):0),...p};
 }
 function renderPlanning(){
+ const adj=manualNoShowAdjustment(),orig=originalPlanTotals();
  return pageHead('Previsão','Lançamento da programação do ciclo operacional. O ciclo pode atravessar a madrugada até a Torre finalizá-lo.',
  `<button id="closeDayBtn" class="btn btn-danger">📥 Finalizar ciclo, baixar e zerar</button>`) +
- `<div class="panel"><div class="panel-title"><h3>Novo lançamento manual</h3></div><form id="planForm"><div class="form-grid">
+ `<div class="panel"><div class="panel-title"><h3>Ajuste de No-show confirmado</h3><span class="small">Abate somente os indicadores operacionais gerais. Não altera o No-show por tipologia.</span></div>
+ <form id="manualNoShowForm"><div class="form-grid">
+ <div><label>Carros confirmados como No-show</label><input id="manualNoShowVehicles" type="number" min="0" max="${orig.vehicles}" value="${adj.vehicles}" required></div>
+ <div><label>Volumes confirmados como No-show</label><input id="manualNoShowVolumes" type="number" min="0" max="${orig.volumes}" value="${adj.volumes}" required></div>
+ <div style="align-self:end"><button class="btn btn-primary" type="submit">Aplicar No-show</button></div>
+ </div></form></div>
+ <div class="panel"><div class="panel-title"><h3>Novo lançamento manual</h3></div><form id="planForm"><div class="form-grid">
  <div><label>Data</label><input id="planDate" type="date" value="${new Date().toISOString().slice(0,10)}" required></div>
  <div><label>Tipologia</label><select id="planTyp" required>${state.typologies.map(t=>`<option>${esc(t.name)}</option>`).join('')}</select></div>
  <div><label>Veículos previstos</label><input id="planVehicles" type="number" min="1" required></div>
@@ -1617,7 +1711,7 @@ function renderPlanning(){
  <div><label>Peso previsto</label><input id="planWeight" type="number" min="0" step="0.01" required></div>
  <div style="align-self:end"><button class="btn btn-primary" type="submit">Adicionar previsão</button></div>
  </div></form></div>
- <div class="panel"><div class="panel-title"><h3>Previsão lançada</h3><span class="small">Somente a previsão operacional do dia</span></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipologia</th><th>Veículos</th><th>Volumes</th><th>Peso</th><th>Média por carro</th><th>Ação</th></tr></thead><tbody>${state.plan.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.typology)}</td><td>${p.vehicles}</td><td>${p.volumes.toLocaleString('pt-BR')}</td><td>${Number(p.weight).toLocaleString('pt-BR')}</td><td>${Math.round(p.volumes/p.vehicles)}</td><td><button class="btn btn-danger delete-plan" data-id="${p.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>`+noShowPanel();
+ <div class="panel"><div class="panel-title"><h3>Previsão lançada</h3><span class="small">Somente a previsão operacional do dia</span></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipologia</th><th>Veículos</th><th>Volumes</th><th>Peso</th><th>Média por carro</th><th>Ação</th></tr></thead><tbody>${operationalPlanRows().map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.typology)}</td><td>${p.vehicles}</td><td>${p.volumes.toLocaleString('pt-BR')}</td><td>${Number(p.weight).toLocaleString('pt-BR')}</td><td>${p.vehicles?Math.round(p.volumes/p.vehicles):0}</td><td><button class="btn btn-danger delete-plan" data-id="${p.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>`+noShowPanel();
 }
 function renderPriorities(){
  const available=state.drivers.filter(d=>d.status==='Ativo'&&driverAvailableForNewAction(d)).sort((a,b)=>a.name.localeCompare(b.name));
@@ -1685,7 +1779,7 @@ function bindPage(){
   $$('[data-active-edit]').forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();openActiveAdminEditor(b.dataset.activeEdit)});
   $$('[data-active-delete]').forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();deleteActiveAdmin(b.dataset.activeDelete)});
   $$('.view-start-photo').forEach(b=>b.onclick=()=>showActivePhoto(b.dataset.id));$$('.share-start-photo').forEach(b=>b.onclick=()=>shareActiveStart(b.dataset.id));
-  $('#planForm')?.addEventListener('submit',addPlan);$('#closeDayBtn')?.addEventListener('click',closeOperationalDay);
+  $('#planForm')?.addEventListener('submit',addPlan);$('#manualNoShowForm')?.addEventListener('submit',applyManualNoShow);$('#closeDayBtn')?.addEventListener('click',closeOperationalDay);
 
   $$('.delete-plan').forEach(b=>b.onclick=async()=>{
     const id=b.dataset.id;
@@ -1716,6 +1810,75 @@ async function fileToDataURL(file,max=420,quality=.30){
  return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>{const img=new Image();img.onload=()=>{const scale=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);resolve(c.toDataURL('image/jpeg',quality))};img.onerror=reject;img.src=r.result};r.onerror=reject;r.readAsDataURL(file)});
 }
 let startingReceiving=false;
+
+
+function dataUrlToBlob(dataUrl){
+ const parts=String(dataUrl||'').split(',');
+ if(parts.length<2)throw new Error('Imagem inválida');
+ const mime=(parts[0].match(/data:([^;]+)/)||[])[1]||'image/jpeg';
+ const bin=atob(parts[1]),arr=new Uint8Array(bin.length);
+ for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
+ return new Blob([arr],{type:mime});
+}
+function safePhotoPart(v){return String(v||'foto').replace(/[^a-zA-Z0-9._-]+/g,'_').slice(0,80)}
+async function uploadCRCPhoto(dataUrl,vehicleId,kind){
+ if(!dataUrl)return null;
+ initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível para salvar a foto');
+ const epoch=currentCycleEpoch(),path=`${epoch}/${safePhotoPart(vehicleId)}/${kind}-${Date.now()}.jpg`;
+ const blob=dataUrlToBlob(dataUrl);
+ const {error}=await supabaseClient.storage.from(CRC_PHOTO_BUCKET).upload(path,blob,{contentType:'image/jpeg',upsert:false,cacheControl:'3600'});
+ if(error)throw new Error('Falha ao salvar foto: '+error.message);
+ return path;
+}
+async function photoSignedUrl(path){
+ if(!path)return null;
+ initSupabase();if(!supabaseClient)return null;
+ const {data,error}=await supabaseClient.storage.from(CRC_PHOTO_BUCKET).createSignedUrl(path,300);
+ if(error)throw error;
+ return data?.signedUrl||null;
+}
+async function resolveCRCPhoto(record,kind){
+ if(!record)return null;
+ const legacy=kind==='start'?record.startPhoto:record.endPhoto;
+ if(typeof legacy==='string'&&legacy.startsWith('data:image/'))return legacy;
+ const path=kind==='start'?record.startPhotoPath:record.endPhotoPath;
+ return path?await photoSignedUrl(path):null;
+}
+async function migrateLegacyPhotoRecord(kind,item){
+ if(!item?.id)return false;
+ let changed=false;
+ if(typeof item.startPhoto==='string'&&item.startPhoto.startsWith('data:image/')){
+  item.startPhotoPath=item.startPhotoPath||await uploadCRCPhoto(item.startPhoto,item.id,'inicio');
+  delete item.startPhoto;changed=true;
+ }
+ if(typeof item.endPhoto==='string'&&item.endPhoto.startsWith('data:image/')){
+  item.endPhotoPath=item.endPhotoPath||await uploadCRCPhoto(item.endPhoto,item.id,'final');
+  delete item.endPhoto;changed=true;
+ }
+ if(changed){
+  item.updatedAt=nowISO();
+  const table=CRC_NORMALIZED_TABLES[kind];
+  const row=cloudRowFor(kind,item);
+  const options={onConflict:conflictColumnFor(kind)};
+  if(kind==='history')options.ignoreDuplicates=false;
+  const {error}=await supabaseClient.from(table).upsert(row,options);
+  if(error)throw error;
+ }
+ return changed;
+}
+async function migrateLegacyPhotosOnce(){
+ if(!cloudSessionAllowed()||!state.settings.supabaseEnabled)return;
+ const legacy=[
+  ...(state.active||[]).filter(x=>typeof x.startPhoto==='string'&&x.startPhoto.startsWith('data:image/')).map(x=>['active',x]),
+  ...(state.history||[]).filter(x=>(typeof x.startPhoto==='string'&&x.startPhoto.startsWith('data:image/'))||(typeof x.endPhoto==='string'&&x.endPhoto.startsWith('data:image/'))).map(x=>['history',x])
+ ];
+ if(!legacy.length)return;
+ try{
+  for(const [kind,item] of legacy)await migrateLegacyPhotoRecord(kind,item);
+  persistLocalSnapshot();syncBaseState=cloneCRC(state);
+  console.info('CRC: fotos antigas migradas para Storage:',legacy.length);
+ }catch(e){console.warn('CRC: migração de fotos antigas ficou pendente.',e)}
+}
 
 async function startReceivingAtomic(activeRecord,patioIds=[],priorityId=null){
  if(!state.settings.supabaseEnabled)return true;
@@ -1770,11 +1933,12 @@ async function startReceiving(e){
   const sourcePatioIds=patioConsumed.map(p=>p.id);
   const startedAt=nowISO();
 
+  const startPhotoPath=await uploadCRCPhoto(photo,activeId,'inicio');
   const activeRecord={
    id:activeId,driverId:driverUpdated.id,driverName:driverUpdated.name,plate:driverUpdated.plate,horse:driverUpdated.horse,
    typology:driverUpdated.typology,dock:dockNorm,operation:session.operation,expectedVolumes:balance.expected,targetMin:target,
-   startedAt,startPhoto:photo,priority:!!pr,priorityId:pr?.id||null,priorityReason:pr?.reason||'',sourcePatioIds,
-   updatedAt:startedAt,operator:session.name,hc,alert50:false,alert80:false,alert100:false,lastOvertimeAlert:0
+   startedAt,startPhotoPath,priority:!!pr,priorityId:pr?.id||null,priorityReason:pr?.reason||'',sourcePatioIds,
+   updatedAt:startedAt,operator:session.name,hc,lastOvertimeAlert:0
   };
 
   // O SERVIDOR CONFIRMA PRIMEIRO. A tela só muda depois.
@@ -1964,11 +2128,14 @@ async function finishReceiving(e,id){
 
   const finishedAt=nowISO(),startedAt=a.startedAt||finishedAt;
   const duration=Math.max(1,Math.round((new Date(finishedAt)-new Date(startedAt))/60000));
+  const endPhotoPath=await uploadCRCPhoto(draft.photo,a.id||id,'final');
   const historyRecord={
    ...a,id:a.id||id,finishedAt,durationMin:duration,receivedVolumes:Number(draft.volumes||0),
-   observation:draft.observation||'',endPhoto:draft.photo,
+   observation:draft.observation||'',endPhotoPath,
    photoStartCode:a.photoStartCode||`INICIO-${Date.now()}`,photoEndCode:`FINAL-${Date.now()}`,updatedAt:finishedAt
   };
+  delete historyRecord.startPhoto;
+  delete historyRecord.endPhoto;
 
   const priorityId=a.priorityId||state.priorities.find(p=>p.status!=='Concluída'&&(p.activeVehicleId===id||(a.plate&&normalizeDriverPlate(p.plate)===normalizeDriverPlate(a.plate))))?.id;
 
@@ -2140,12 +2307,30 @@ async function openCamera(target){
  startCam();
 }
 
-function checkTimeAlerts(){const t=Date.now();let changed=false;state.active.forEach(a=>{const started=parseOperationalTime(a.startedAt);if(!Number.isFinite(started))return;const pct=((t-started)/60000)/Math.max(1,a.targetMin);if(pct>=.5&&!a.alert50){toast(`Doca ${a.dock} • ${a.driverName} • 50% do tempo utilizado.`,'attention',7000);a.alert50=true;changed=true}if(pct>=.8&&!a.alert80){toast(`Doca ${a.dock} • ${a.driverName} • faltam poucos minutos para o limite.`,'warning',8000);a.alert80=true;changed=true}if(pct>=1&&!a.alert100){toast(`Doca ${a.dock} • ${a.driverName} • tempo limite atingido.`,'overtime',9000);a.alert100=true;a.lastOvertimeAlert=t;changed=true}else if(pct>=1&&(!a.lastOvertimeAlert||t-a.lastOvertimeAlert>=300000)){toast(`Doca ${a.dock} • ${a.driverName} • descarregamento acima do tempo.`,'overtime',9000);a.lastOvertimeAlert=t;changed=true}});if(changed)save(false)}
+function checkTimeAlerts(){
+ const t=Date.now();let changed=false;
+ state.active.forEach(a=>{
+  const started=parseOperationalTime(a.startedAt);if(!Number.isFinite(started))return;
+  const elapsedMin=(t-started)/60000,target=Math.max(1,Number(a.targetMin||1));
+  if(elapsedMin<=target)return;
+  if(!a.lastOvertimeAlert||t-a.lastOvertimeAlert>=600000){
+   toast(`Doca ${a.dock} • ${a.driverName} • descarregamento acima do tempo.`,'overtime',9000);
+   a.lastOvertimeAlert=t;changed=true;
+  }
+ });
+ if(changed)save(false);
+}
 function resetInactivity(){ /* logout automático desativado */ } // V10.8: sem logout automático por inatividade.
 
 function closeModal(){if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null}$('#modal').classList.add('hidden');$('#modalBox').innerHTML=''}
-function showActivePhoto(id){const a=state.active.find(x=>x.id===id);showPhoto(a?.startPhoto,'Foto inicial')}
-function showHistoryPhoto(id,kind){const h=state.history.find(x=>x.id===id);showPhoto(kind==='start'?h?.startPhoto:h?.endPhoto,kind==='start'?'Foto inicial':'Foto final')}
+async function showActivePhoto(id){
+ const a=state.active.find(x=>x.id===id);if(!a)return toast('Registro não encontrado.','error');
+ try{showPhoto(await resolveCRCPhoto(a,'start'),'Foto inicial')}catch(e){toast('Não foi possível carregar a foto inicial.','error')}
+}
+async function showHistoryPhoto(id,kind){
+ const h=state.history.find(x=>x.id===id);if(!h)return toast('Registro não encontrado.','error');
+ try{showPhoto(await resolveCRCPhoto(h,kind),kind==='start'?'Foto inicial':'Foto final')}catch(e){toast('Não foi possível carregar a foto.','error')}
+}
 function showPhoto(src,title){if(!src)return toast('Foto não encontrada.','error');$('#modalBox').innerHTML=`<div class="modal-head"><h3>${title}</h3><button class="close" onclick="closeModal()">✕</button></div><img class="photo-preview" src="${src}">`;$('#modal').classList.remove('hidden')}
 
 
@@ -2234,8 +2419,27 @@ function reportCanvas(){
 
  // Painel 2 - indicadores
  box(35,670,1130,430,'2. Indicadores Operacionais');
- const s=stats(),k=[['Carros previstos',s.plannedV],['Carros recebidos',s.receivedV],['Pendentes',s.pendingV],['No pátio',s.patio],['Em descarga',s.active],['HC operação',s.activeHC],['Docas livres',s.free],['Docas ocupadas',s.busy],['VLS previstos',s.plannedVol],['VLS recebidos',s.receivedVol],['VLS pendentes',s.pendingVol],['Tempo médio',s.avg+' min']];
- k.forEach((it,i)=>{const col=i%4,row=Math.floor(i/4),kx=55+col*272,ky=730+row*105;x.fillStyle='#f8fafc';x.strokeStyle='#e2e8f0';x.beginPath();x.roundRect(kx,ky,250,86,10);x.fill();x.stroke();x.fillStyle='#64748b';x.font='14px Arial';x.fillText(it[0],kx+14,ky+25);x.fillStyle='#10204b';x.font='bold 27px Arial';x.fillText(String(it[1]).slice(0,18),kx+14,ky+60)});
+ const s=stats(),k=[
+  {label:'Carros previstos',value:s.plannedV,minus:s.noShowAdjV},
+  {label:'Carros recebidos',value:s.receivedV},
+  {label:'Pendentes',value:s.pendingV},
+  {label:'No pátio',value:s.patio},
+  {label:'Em descarga',value:s.active},
+  {label:'HC operação',value:s.activeHC},
+  {label:'Docas livres',value:s.free},
+  {label:'Docas ocupadas',value:s.busy},
+  {label:'VLS previstos',value:s.plannedVol,minus:s.noShowAdjVol},
+  {label:'VLS recebidos',value:s.receivedVol},
+  {label:'VLS pendentes',value:s.pendingVol},
+  {label:'Tempo médio',value:s.avg+' min'}
+ ];
+ k.forEach((it,i)=>{
+  const col=i%4,row=Math.floor(i/4),kx=55+col*272,ky=730+row*105;
+  x.fillStyle='#f8fafc';x.strokeStyle='#e2e8f0';x.beginPath();x.roundRect(kx,ky,250,86,10);x.fill();x.stroke();
+  x.fillStyle='#64748b';x.font='14px Arial';x.fillText(it.label,kx+14,ky+25);
+  if(Number(it.minus||0)>0){x.fillStyle='#dc2626';x.font='bold 15px Arial';x.textAlign='right';x.fillText('− '+Number(it.minus).toLocaleString('pt-BR'),kx+236,ky+25);x.textAlign='left'}
+  x.fillStyle='#10204b';x.font='bold 27px Arial';x.fillText(String(it.value).slice(0,18),kx+14,ky+60);
+ });
 
  // Painel 3 - no-show
  box(35,1125,1130,620,'3. No-show • Ciclo '+operationalPlanDate());
@@ -2271,26 +2475,44 @@ async function sharePanelsReport(){
 }
 
 async function shareActiveStart(id){
- const a=state.active.find(x=>x.id===id);if(!a?.startPhoto)return toast('Foto inicial não encontrada.','error');
- const txt=`🚚 DESCARGA INICIADA\n\nMotorista: ${a.driverName}\nPlaca: ${a.plate}\nCavalo: ${a.horse}\nTipologia: ${a.typology}\nDoca: ${a.dock}\nInício original: ${brDate(a.startedAt)}\nOperador: ${a.operator||session.name}`;
- await compartilharFotoOperacao(a.startPhoto,txt,`Inicio_${a.plate}.jpg`);
+ const a=state.active.find(x=>x.id===id);if(!a)return toast('Foto inicial não encontrada.','error');
+ try{
+  const photo=await resolveCRCPhoto(a,'start');if(!photo)return toast('Foto inicial não encontrada.','error');
+  const txt=`🚚 DESCARGA INICIADA\n\nMotorista: ${a.driverName}\nPlaca: ${a.plate}\nCavalo: ${a.horse}\nTipologia: ${a.typology}\nDoca: ${a.dock}\nInício original: ${brDate(a.startedAt)}\nOperador: ${a.operator||session.name}`;
+  await compartilharFotoOperacao(photo,txt,`Inicio_${a.plate}.jpg`);
+ }catch(e){toast('Não foi possível carregar a foto inicial.','error')}
 }
 async function shareHistoryPhoto(id,kind){
  const h=state.history.find(x=>x.id===id);if(!h)return toast('Registro não encontrado.','error');
- const isStart=kind==='start',photo=isStart?h.startPhoto:h.endPhoto;if(!photo)return toast('Foto não encontrada.','error');
- const txt=`${isStart?'🚚 DESCARGA INICIADA':'✅ DESCARGA FINALIZADA'}\n\nMotorista: ${h.driverName}\nPlaca: ${h.plate}\nCavalo: ${h.horse}\nTipologia: ${h.typology}\nDoca: ${h.dock}\n${isStart?'Início':'Fim'} original: ${brDate(isStart?h.startedAt:h.finishedAt)}\nOperador: ${h.operator||session.name}`;
- await compartilharFotoOperacao(photo,txt,`${isStart?'Inicio':'Final'}_${h.plate}.jpg`);
+ try{
+  const isStart=kind==='start',photo=await resolveCRCPhoto(h,kind);if(!photo)return toast('Foto não encontrada.','error');
+  const txt=`${isStart?'🚚 DESCARGA INICIADA':'✅ DESCARGA FINALIZADA'}\n\nMotorista: ${h.driverName}\nPlaca: ${h.plate}\nCavalo: ${h.horse}\nTipologia: ${h.typology}\nDoca: ${h.dock}\n${isStart?'Início':'Fim'} original: ${brDate(isStart?h.startedAt:h.finishedAt)}\nOperador: ${h.operator||session.name}`;
+  await compartilharFotoOperacao(photo,txt,`${isStart?'Inicio':'Final'}_${h.plate}.jpg`);
+ }catch(e){toast('Não foi possível carregar a foto.','error')}
 }
 function auditFileName(){return `CRC_Auditoria_Fotos_${localDateKey()}.html`}
-function downloadAuditPhotos(){
- const recs=state.history.slice();
- const html=`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>CRC Auditoria ${localDateKey()}</title><style>body{font-family:Arial;margin:24px}article{border:1px solid #ccc;border-radius:12px;padding:16px;margin:16px 0}img{max-width:760px;max-height:620px;margin:8px 0;border-radius:8px;display:block}code{font-weight:bold;font-size:15px}.photo{padding-top:12px}</style><h1>CRC — Auditoria ${localDateKey()}</h1><p>${recs.length} recebimentos finalizados.</p>${recs.map(h=>`<article><h2>${esc(h.driverName)} — ${esc(h.plate)}</h2><p>${esc(h.typology)} • Doca ${esc(h.dock)} • ${brDate(h.finishedAt)}</p>${h.startPhoto?`<div class="photo" id="${esc(h.photoStartCode)}"><code>${esc(h.photoStartCode)}</code><br>Foto inicial<img src="${h.startPhoto}"></div>`:''}${h.endPhoto?`<div class="photo" id="${esc(h.photoEndCode)}"><code>${esc(h.photoEndCode)}</code><br>Foto final<img src="${h.endPhoto}"></div>`:''}</article>`).join('')}</html>`;
+async function urlToDataURL(url){
+ if(!url)return null;
+ if(String(url).startsWith('data:image/'))return url;
+ const res=await fetch(url);if(!res.ok)throw new Error('Falha ao baixar foto');
+ const blob=await res.blob();
+ return await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(blob)});
+}
+async function downloadAuditPhotos(){
+ const recs=state.history.slice(),resolved=[];
+ for(const h of recs){
+  let start=null,end=null;
+  try{start=await urlToDataURL(await resolveCRCPhoto(h,'start'))}catch(_){}
+  try{end=await urlToDataURL(await resolveCRCPhoto(h,'end'))}catch(_){}
+  resolved.push({h,start,end});
+ }
+ const html=`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>CRC Auditoria ${localDateKey()}</title><style>body{font-family:Arial;margin:24px}article{border:1px solid #ccc;border-radius:12px;padding:16px;margin:16px 0}img{max-width:760px;max-height:620px;margin:8px 0;border-radius:8px;display:block}code{font-weight:bold;font-size:15px}.photo{padding-top:12px}</style><h1>CRC — Auditoria ${localDateKey()}</h1><p>${recs.length} recebimentos finalizados.</p>${resolved.map(({h,start,end})=>`<article><h2>${esc(h.driverName)} — ${esc(h.plate)}</h2><p>${esc(h.typology)} • Doca ${esc(h.dock)} • ${brDate(h.finishedAt)}</p>${start?`<div class="photo" id="${esc(h.photoStartCode)}"><code>${esc(h.photoStartCode)}</code><br>Foto inicial<img src="${start}"></div>`:''}${end?`<div class="photo" id="${esc(h.photoEndCode)}"><code>${esc(h.photoEndCode)}</code><br>Foto final<img src="${end}"></div>`:''}</article>`).join('')}</html>`;
  const blob=new Blob([html],{type:'text/html;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=auditFileName();a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
 }
 async function closeOperationalDay(){
  if(!confirm('Finalizar este ciclo operacional? O CRC vai baixar a produção e a auditoria das fotos e DEPOIS encerrar definitivamente o ciclo.'))return;
  if(!confirm('CONFIRMA O ENCERRAMENTO DEFINITIVO? Depois de confirmado no Supabase, nenhum aparelho poderá trazer de volta previsões, pátio, prioridades, docas em descarga, histórico ou logs deste ciclo.'))return;
- exportExcel();downloadAuditPhotos();
+ exportExcel();await downloadAuditPhotos();
  await new Promise(r=>setTimeout(r,500));
  try{
   const epoch=await resetOperationalCycleServer();
@@ -2623,6 +2845,11 @@ async function resetOperationalCycleServer(){
 
 function cloudRowFor(kind,item){
  const dados=cloneCRC(item||{});
+ // Fotos nunca trafegam dentro de dados/Realtime. Apenas o caminho no Storage.
+ if(dados&&typeof dados==='object'){
+  delete dados.startPhoto;
+  delete dados.endPhoto;
+ }
  dados._crc_cycle_epoch=currentCycleEpoch();
  dados._crc_entity_epoch=entityMutationEpoch(item);
  if(kind==='patio'||kind==='active')dados._crc_kind=kind;
@@ -2970,7 +3197,7 @@ async function pullCloud(force=false){
    if(dockBootstrapError)throw dockBootstrapError;
   }
   next.settings={...next.settings,...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
-  next.version='13.14.2';
+  next.version='13.15.0';
   state=normalizeStateShape(next);
   enforceDefaultAccessAndDedupe();
   // Autocorreção eventual: só escreve se o banco trouxe um registro incompatível
