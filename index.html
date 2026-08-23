@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.15.0 NO-SHOW MANUAL + FOTOS SOB DEMANDA</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.15.1 NO-SHOW MANUAL CORRIGIDO</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -506,7 +506,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:15},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'13.15.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'13.15.1',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -650,6 +650,15 @@ function normalizeStateShape(target){
  target.drivers=target.drivers.filter(x=>!deletedDrivers.has(x.id));
  target.docks=target.docks.filter(x=>!deletedDocks.has(x.id));
  target.plan=target.plan.filter(x=>!deletedPlans.has(x.id));
+ // O registro técnico do No-show manual precisa sobreviver à normalização,
+ // mas continua excluído de todos os cálculos por tipologia/previsão operacional.
+ (target.plan||[]).forEach(p=>{
+  if(p&&(p.isNoShowAdjustment===true||p.typology==='__CRC_NO_SHOW_AJUSTE__')){
+   p.isNoShowAdjustment=true;
+   p.vehicles=Math.max(1,Number(p.vehicles||0));
+   p.volumes=Math.max(1,Number(p.volumes||0));
+  }
+ });
  target.plan=(target.plan||[]).filter(p=>p&&p.id&&p.date&&p.typology&&Number(p.vehicles)>0&&Number(p.volumes)>0);
  target.priorities=(target.priorities||[]).filter(p=>p&&p.id&&p.driverId&&p.driverName&&p.plate&&p.createdAt);
  target.settings=target.settings||{};
@@ -861,7 +870,7 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='13.14.2';
+ state.version='13.15.1';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
@@ -1140,7 +1149,7 @@ async function applyManualNoShow(e){
  const now=nowISO(),date=operationalPlanDate();
  let row=manualNoShowRecord();
  if(!row){
-  row={id:uid(),date,typology:CRC_NO_SHOW_ADJUSTMENT_TYPE,vehicles:0,volumes:0,weight:0,isNoShowAdjustment:true,createdAt:now,updatedAt:now,noShowVehicles:0,noShowVolumes:0};
+  row={id:uid(),date,typology:CRC_NO_SHOW_ADJUSTMENT_TYPE,vehicles:1,volumes:1,weight:0,isNoShowAdjustment:true,createdAt:now,updatedAt:now,noShowVehicles:0,noShowVolumes:0};
   state.plan.push(row);
  }
  Object.assign(row,{date,isNoShowAdjustment:true,noShowVehicles:vehicles,noShowVolumes:volumes,updatedAt:now});
@@ -3197,7 +3206,7 @@ async function pullCloud(force=false){
    if(dockBootstrapError)throw dockBootstrapError;
   }
   next.settings={...next.settings,...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
-  next.version='13.15.0';
+  next.version='13.15.1';
   state=normalizeStateShape(next);
   enforceDefaultAccessAndDedupe();
   // Autocorreção eventual: só escreve se o banco trouxe um registro incompatível
