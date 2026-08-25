@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.15.1 NO-SHOW MANUAL CORRIGIDO</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.15.3 COMPARTILHAMENTO HISTÓRICO PADRONIZADO</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -506,7 +506,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:15},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'13.15.1',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'13.15.3',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -870,7 +870,7 @@ function persistLocalSnapshot(){
 }
 function save(sync=true){
  state.meta=state.meta||{};
- state.version='13.15.1';
+ state.version='13.15.3';
  state.meta.updatedAt=nowISO();
  state.meta.revision=Number(state.meta.revision||0)+1;
  lastLocalMutationAt=Date.now();
@@ -1376,30 +1376,99 @@ function openActiveAdminEditor(id){
  $('#activeAdminEditForm').onsubmit=saveActiveAdminEdit;
 }
 async function saveActiveAdminEdit(e){
- e.preventDefault();const id=$('#activeAdminId').value,a=activeById(id);if(!a)return toast('Veículo ativo não encontrado.','error');
+ e.preventDefault();
+ const id=$('#activeAdminId').value,a=activeById(id);
+ if(!a)return toast('Veículo ativo não encontrado.','error');
  const oldDock=normalizeDockNumber(a.dock),newDock=normalizeDockNumber($('#activeAdminDock').value);
- if(newDock!==oldDock&&state.active.some(x=>!sameId(x.id,id)&&normalizeDockNumber(x.dock)===newDock))return toast('A doca escolhida já está ocupada.','error');
- Object.assign(a,{driverName:normalizeDriverName($('#activeAdminDriver').value),plate:normalizeDriverPlate($('#activeAdminPlate').value),horse:normalizeDriverPlate($('#activeAdminHorse').value)||'S/N',typology:$('#activeAdminTyp').value,dock:newDock,operation:$('#activeAdminOperation').value,hc:Math.max(1,Number($('#activeAdminHC').value||1)),expectedVolumes:Math.max(0,Number($('#activeAdminExpected').value||0)),updatedAt:nowISO()});
- const oldRow=state.docks.find(d=>normalizeDockNumber(d.number)===oldDock);if(oldRow)oldRow.status='Livre';
- const newRow=state.docks.find(d=>normalizeDockNumber(d.number)===newDock);if(newRow)newRow.status='Ocupada';
- log('Editou descarregamento ativo',`${a.driverName} • Doca ${a.dock}`,false);
- save(false);
- const ok=await syncCloud(true);
- if(!ok)return;
- closeModal();render();toast('Descarregamento atualizado e confirmado no Supabase.','ok');
+ if(newDock!==oldDock&&state.active.some(x=>!sameId(x.id,id)&&normalizeDockNumber(x.dock)===newDock))
+  return toast('A doca escolhida já está ocupada.','error');
+
+ const candidate={...a,
+  driverName:normalizeDriverName($('#activeAdminDriver').value),
+  plate:normalizeDriverPlate($('#activeAdminPlate').value),
+  horse:normalizeDriverPlate($('#activeAdminHorse').value)||'S/N',
+  typology:$('#activeAdminTyp').value,
+  dock:newDock,
+  operation:$('#activeAdminOperation').value,
+  hc:Math.max(1,Number($('#activeAdminHC').value||1)),
+  expectedVolumes:Math.max(0,Number($('#activeAdminExpected').value||0)),
+  updatedAt:nowISO()
+ };
+
+ const btn=e.submitter||$('#activeAdminEditForm button[type="submit"]');
+ const oldText=btn?.textContent||'Salvar alterações';
+ if(btn){btn.disabled=true;btn.textContent='Confirmando...'}
+ try{
+  if(state.settings.supabaseEnabled){
+   initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
+   const {error}=await supabaseClient
+    .from(CRC_NORMALIZED_TABLES.active)
+    .upsert(cloudRowFor('active',candidate),{onConflict:conflictColumnFor('active')});
+   if(error)throw error;
+
+   const dockRows=[];
+   const oldRow=state.docks.find(d=>normalizeDockNumber(d.number)===oldDock);
+   const newRow=state.docks.find(d=>normalizeDockNumber(d.number)===newDock);
+   if(oldRow&&oldDock!==newDock)dockRows.push(cloudRowFor('docks',{...oldRow,status:'Livre',updatedAt:nowISO()}));
+   if(newRow)dockRows.push(cloudRowFor('docks',{...newRow,status:'Ocupada',updatedAt:nowISO()}));
+   if(dockRows.length){
+    const {error:dockError}=await supabaseClient.from(CRC_NORMALIZED_TABLES.docks).upsert(dockRows,{onConflict:'numero'});
+    if(dockError)throw dockError;
+   }
+  }
+
+  Object.assign(a,candidate);
+  const oldLocal=state.docks.find(d=>normalizeDockNumber(d.number)===oldDock);
+  const newLocal=state.docks.find(d=>normalizeDockNumber(d.number)===newDock);
+  if(oldLocal&&oldDock!==newDock)oldLocal.status='Livre';
+  if(newLocal)newLocal.status='Ocupada';
+  log('Editou descarregamento ativo',`${a.driverName} • Doca ${a.dock}`,false);
+  save(false);syncBaseState=cloneCRC(state);localDirty=false;
+  closeModal();render();toast('Descarregamento atualizado e confirmado no Supabase.','ok');
+ }catch(err){
+  console.error('CRC: falha ao editar descarregamento ativo.',err);
+  toast('Não foi possível editar o descarregamento: '+(err?.message||err),'error',9000);
+  try{await pullCloud(true)}catch(_){}
+ }finally{
+  if(btn&&document.body.contains(btn)){btn.disabled=false;btn.textContent=oldText}
+ }
 }
 async function deleteActiveAdmin(id){
- const a=activeById(id);if(!a)return;
+ const a=activeById(id);if(!a)return toast('Veículo ativo não encontrado.','error');
  if(!confirm(`Excluir o descarregamento ativo de ${a.driverName} na Doca ${a.dock}?`))return;
- if(!confirm('Confirma a exclusão? O veículo não retornará automaticamente.'))return;
- state.meta=state.meta||{};state.meta.completedVehicleIds=[...new Set([...(state.meta.completedVehicleIds||[]),id])];
- state.active=state.active.filter(x=>!sameId(x.id,id));
- const dock=state.docks.find(d=>normalizeDockNumber(d.number)===normalizeDockNumber(a.dock));if(dock)dock.status='Livre';
- log('Excluiu descarregamento ativo',`${a.driverName} • ${a.plate} • Doca ${a.dock}`,false);
- save(false);
- const ok=await syncCloud(true);
- if(!ok)return;
- render();toast('Descarregamento excluído e confirmado no Supabase.','ok');
+ if(!confirm('Confirma a exclusão? O veículo será removido da doca e não retornará automaticamente.'))return;
+ try{
+  if(state.settings.supabaseEnabled){
+   initSupabase();if(!supabaseClient)throw new Error('Supabase indisponível');
+   const {error}=await supabaseClient
+    .from(CRC_NORMALIZED_TABLES.active)
+    .delete()
+    .eq('codigo_cliente',String(id))
+    .eq('status','descarregando');
+   if(error)throw error;
+
+   const dock=state.docks.find(d=>normalizeDockNumber(d.number)===normalizeDockNumber(a.dock));
+   if(dock){
+    const {error:dockError}=await supabaseClient
+     .from(CRC_NORMALIZED_TABLES.docks)
+     .upsert(cloudRowFor('docks',{...dock,status:'Livre',updatedAt:nowISO()}),{onConflict:'numero'});
+    if(dockError)throw dockError;
+   }
+  }
+
+  state.meta=state.meta||{};
+  state.meta.completedVehicleIds=[...new Set([...(state.meta.completedVehicleIds||[]),String(id)])];
+  state.active=state.active.filter(x=>!sameId(x.id,id));
+  const dock=state.docks.find(d=>normalizeDockNumber(d.number)===normalizeDockNumber(a.dock));
+  if(dock)dock.status='Livre';
+  log('Excluiu descarregamento ativo',`${a.driverName} • ${a.plate} • Doca ${a.dock}`,false);
+  save(false);syncBaseState=cloneCRC(state);localDirty=false;
+  render();toast('Descarregamento excluído e confirmado no Supabase.','ok');
+ }catch(err){
+  console.error('CRC: falha ao excluir descarregamento ativo.',err);
+  toast('Não foi possível excluir o descarregamento: '+(err?.message||err),'error',9000);
+  try{await pullCloud(true)}catch(_){}
+ }
 }
 
 function activeCards(showFinalize=true){
@@ -2492,12 +2561,22 @@ async function shareActiveStart(id){
  }catch(e){toast('Não foi possível carregar a foto inicial.','error')}
 }
 async function shareHistoryPhoto(id,kind){
- const h=state.history.find(x=>x.id===id);if(!h)return toast('Registro não encontrado.','error');
+ const h=state.history.find(x=>x.id===id);
+ if(!h)return toast('Registro não encontrado.','error');
  try{
-  const isStart=kind==='start',photo=await resolveCRCPhoto(h,kind);if(!photo)return toast('Foto não encontrada.','error');
-  const txt=`${isStart?'🚚 DESCARGA INICIADA':'✅ DESCARGA FINALIZADA'}\n\nMotorista: ${h.driverName}\nPlaca: ${h.plate}\nCavalo: ${h.horse}\nTipologia: ${h.typology}\nDoca: ${h.dock}\n${isStart?'Início':'Fim'} original: ${brDate(isStart?h.startedAt:h.finishedAt)}\nOperador: ${h.operator||session.name}`;
+  const isStart=kind==='start';
+  const photo=await resolveCRCPhoto(h,kind);
+  if(!photo)return toast('Foto não encontrada.','error');
+
+  const receivedVolumes=Number(h.receivedVolumes||h.volumes||0);
+  const txt=isStart
+   ? `🚚 DESCARGA INICIADA\n\nMotorista: ${h.driverName}\nPlaca: ${h.plate}\nCavalo: ${h.horse}\nTipologia: ${h.typology}\nDoca: ${h.dock}\nInício original: ${brDate(h.startedAt)}\nOperador: ${h.operator||session.name}`
+   : `✅ DESCARGA FINALIZADA\n\nMotorista: ${h.driverName}\nPlaca: ${h.plate}\nCavalo: ${h.horse}\nTipologia: ${h.typology}\nDoca: ${h.dock}\nVLS recebidos: ${receivedVolumes.toLocaleString('pt-BR')}\nFim original: ${brDate(h.finishedAt)}\nOperador: ${h.operator||session.name}`;
+
   await compartilharFotoOperacao(photo,txt,`${isStart?'Inicio':'Final'}_${h.plate}.jpg`);
- }catch(e){toast('Não foi possível carregar a foto.','error')}
+ }catch(e){
+  toast('Não foi possível carregar a foto.','error');
+ }
 }
 function auditFileName(){return `CRC_Auditoria_Fotos_${localDateKey()}.html`}
 async function urlToDataURL(url){
@@ -2518,18 +2597,49 @@ async function downloadAuditPhotos(){
  const html=`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>CRC Auditoria ${localDateKey()}</title><style>body{font-family:Arial;margin:24px}article{border:1px solid #ccc;border-radius:12px;padding:16px;margin:16px 0}img{max-width:760px;max-height:620px;margin:8px 0;border-radius:8px;display:block}code{font-weight:bold;font-size:15px}.photo{padding-top:12px}</style><h1>CRC — Auditoria ${localDateKey()}</h1><p>${recs.length} recebimentos finalizados.</p>${resolved.map(({h,start,end})=>`<article><h2>${esc(h.driverName)} — ${esc(h.plate)}</h2><p>${esc(h.typology)} • Doca ${esc(h.dock)} • ${brDate(h.finishedAt)}</p>${start?`<div class="photo" id="${esc(h.photoStartCode)}"><code>${esc(h.photoStartCode)}</code><br>Foto inicial<img src="${start}"></div>`:''}${end?`<div class="photo" id="${esc(h.photoEndCode)}"><code>${esc(h.photoEndCode)}</code><br>Foto final<img src="${end}"></div>`:''}</article>`).join('')}</html>`;
  const blob=new Blob([html],{type:'text/html;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=auditFileName();a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
 }
+
+function currentCyclePhotoPaths(){
+ const paths=[];
+ for(const x of [...(state.active||[]),...(state.history||[])]){
+  if(x?.startPhotoPath)paths.push(String(x.startPhotoPath));
+  if(x?.endPhotoPath)paths.push(String(x.endPhotoPath));
+ }
+ return [...new Set(paths.filter(Boolean))];
+}
+async function deleteClosedCyclePhotos(paths){
+ if(!paths?.length)return true;
+ initSupabase();if(!supabaseClient)return false;
+ try{
+  for(let i=0;i<paths.length;i+=100){
+   const batch=paths.slice(i,i+100);
+   const {error}=await supabaseClient.storage.from(CRC_PHOTO_BUCKET).remove(batch);
+   if(error)throw error;
+  }
+  return true;
+ }catch(e){
+  console.warn('CRC: ciclo foi encerrado, mas algumas fotos não puderam ser removidas do Storage.',e);
+  return false;
+ }
+}
+
 async function closeOperationalDay(){
- if(!confirm('Finalizar este ciclo operacional? O CRC vai baixar a produção e a auditoria das fotos e DEPOIS encerrar definitivamente o ciclo.'))return;
- if(!confirm('CONFIRMA O ENCERRAMENTO DEFINITIVO? Depois de confirmado no Supabase, nenhum aparelho poderá trazer de volta previsões, pátio, prioridades, docas em descarga, histórico ou logs deste ciclo.'))return;
- exportExcel();await downloadAuditPhotos();
- await new Promise(r=>setTimeout(r,500));
+ if(!confirm('Finalizar este ciclo operacional? O CRC vai baixar SOMENTE a relação de produção em Excel e depois encerrar definitivamente o ciclo. As fotos NÃO serão baixadas.'))return;
+ if(!confirm('CONFIRMA O ENCERRAMENTO DEFINITIVO? Depois de confirmado no Supabase, nenhum aparelho poderá trazer de volta previsões, pátio, prioridades, docas em descarga, histórico ou logs deste ciclo. As fotos do ciclo serão apagadas do Storage.'))return;
+ const photoPaths=currentCyclePhotoPaths();
+ exportExcel();
+ await new Promise(r=>setTimeout(r,350));
  try{
   const epoch=await resetOperationalCycleServer();
+  const photosDeleted=await deleteClosedCyclePhotos(photoPaths);
   render();
-  toast(`Ciclo encerrado definitivamente (${epoch}). O CRC está pronto para uma nova previsão.`,'ok',9500);
+  if(photosDeleted){
+   toast(`Ciclo encerrado definitivamente (${epoch}). Excel baixado e fotos do ciclo excluídas.`,'ok',9500);
+  }else{
+   toast(`Ciclo encerrado definitivamente (${epoch}) e Excel baixado. Algumas fotos ficaram pendentes de limpeza no Storage.`,'warn',11000);
+  }
  }catch(e){
   console.error('CRC: falha no encerramento soberano.',e);
-  toast('O Supabase NÃO confirmou o encerramento. O ciclo não foi alterado: '+(e?.message||e),'error',12000);
+  toast('O Supabase NÃO confirmou o encerramento. O ciclo não foi alterado e as fotos NÃO foram excluídas: '+(e?.message||e),'error',12000);
   try{await pullCloud(true)}catch(_){}
  }
 }
@@ -3206,7 +3316,7 @@ async function pullCloud(force=false){
    if(dockBootstrapError)throw dockBootstrapError;
   }
   next.settings={...next.settings,...localSettings,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true};
-  next.version='13.15.1';
+  next.version='13.15.3';
   state=normalizeStateShape(next);
   enforceDefaultAccessAndDedupe();
   // Autocorreção eventual: só escreve se o banco trouxe um registro incompatível
