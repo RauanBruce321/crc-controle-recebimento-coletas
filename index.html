@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2f5f">
-<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.15.3 COMPARTILHAMENTO HISTÓRICO PADRONIZADO</title>
+<title>CRC — Controle de Recebimento de Coletas OFICIAL V13.16.0 TEMPO POR TIPOLOGIA E ETA OPERACIONAL</title>
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CRC%20-%20Controle%20de%20Recebimento%20de%20Coletas%22%2C%22short_name%22%3A%22CRC%22%2C%22start_url%22%3A%22.%2F%22%2C%22scope%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230b1733%22%2C%22theme_color%22%3A%22%231f2f5f%22%2C%22lang%22%3A%22pt-BR%22%7D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -506,7 +506,7 @@ function seed(){
   const plan=[];
   const drivers=[];
   const docks=Array.from({length:15},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
-  return {version:'13.15.3',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
+  return {version:'13.16.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
  try{return JSON.parse(localStorage.getItem(DBKEY)||'null')}catch(e){return null}
@@ -1106,11 +1106,12 @@ function log(action,detail='',autoSave=true){
 
 function roleName(r){return({patio:'Controle de Pátio',tower:'Administrativo',receiving:'Recebimento Operacional',panel:'Painel Operacional',admin:'Administrativo',leader:'Líder'})[r]||r}
 function can(...roles){return session&&roles.includes(session.role)}
-function isVisible(page){const map={dashboard:['tower','receiving','patio','panel'],patio:['patio'],receiving:['receiving'],planning:['tower'],priorities:['patio'],history:['tower','receiving'],drivers:['tower','receiving'],docks:[],admin:[],logs:[]};return (map[page]||[]).includes(session.role)}
+function isVisible(page){const map={dashboard:['tower','receiving','patio','panel'],patio:['patio'],receiving:['receiving'],planning:['tower'],priorities:['patio'],history:['tower','receiving'],drivers:['tower','receiving'],docks:[],admin:[],logs:[],typologyTimes:['tower']};return (map[page]||[]).includes(session.role)}
 const navItems=[
   ['dashboard','📊','Painel Geral'],['patio','🅿️','Carros no Pátio'],['receiving','🚚','Recebimento'],['planning','🗓️','Previsão'],
   ['priorities','🚨','Prioridades'],['history','📋','Lista / Histórico'],['drivers','👨‍✈️','Motoristas'],
-  ['docks','🚪','Docas'],['admin','⚙️','Administração'],['logs','🕘','Histórico do Sistema']
+  ['docks','🚪','Docas'],['admin','⚙️','Administração'],['logs','🕘','Histórico do Sistema'],
+  ['typologyTimes','⏱️','Tempo tipologias']
 ];
 function renderNav(){
   $('#mainNav').innerHTML=navItems.filter(x=>isVisible(x[0])).map(([id,ic,tx])=>`<button data-page="${id}" class="${currentPage===id?'active':''}"><span class="nav-icon">${ic}</span><span class="nav-text">${tx}</span></button>`).join('');
@@ -1173,9 +1174,23 @@ function stats(){
  const plannedVol=Math.max(0,originalPlannedVol-noShowAdjVol);
  const receivedV=history.length,receivedVol=history.reduce((a,b)=>a+Number(b.receivedVolumes||0),0);
  const avg=history.length?Math.round(history.reduce((a,b)=>a+Number(b.durationMin||0),0)/history.length):0;
- const rate=history.length?receivedVol/Math.max(1,history.reduce((a,b)=>a+Number(b.durationMin||0),0)):0;
- const remaining=Math.max(0,plannedVol-receivedVol),eta=rate?Math.round(remaining/rate):0;
+ const remaining=Math.max(0,plannedVol-receivedVol);
  const activeHC=active.reduce((a,b)=>a+Number(b.hc||0),0);
+ // ETA operacional por tipologia: evita projetar o saldo inteiro apenas por volumes/minuto histórico.
+ // Cada veículo pendente usa o tempo-meta configurado; a carga é dividida pela capacidade simultânea real.
+ const typTarget=name=>Math.max(1,Number(state.typologies.find(t=>String(t.name).toLowerCase()===String(name||'').toLowerCase())?.targetMin||avg||30));
+ const cycleDate=operationalPlanDate();
+ const plannedByTyp=new Map();
+ plan.filter(p=>!p.date||p.date===cycleDate).forEach(p=>plannedByTyp.set(p.typology,(plannedByTyp.get(p.typology)||0)+Number(p.vehicles||0)));
+ const completedByTyp=new Map(); history.forEach(h=>completedByTyp.set(h.typology,(completedByTyp.get(h.typology)||0)+1));
+ let workloadMin=0;
+ plannedByTyp.forEach((qty,typ)=>{const done=completedByTyp.get(typ)||0;workloadMin+=Math.max(0,qty-done)*typTarget(typ)});
+ // Veículos já em descarga já estão incluídos no saldo acima; desconta o tempo já trabalhado deles.
+ active.forEach(a=>{const elapsed=mins(Date.now()-new Date(a.startedAt));workloadMin-=Math.min(typTarget(a.typology),elapsed)});
+ workloadMin=Math.max(0,workloadMin);
+ const usableDocks=Math.max(1,state.docks.filter(d=>d.status!=='Bloqueada').length);
+ const simultaneous=Math.max(1,Math.min(usableDocks,activeHC||active.length||1));
+ const eta=Math.round(workloadMin/simultaneous);
  return {
   plannedV,plannedVol,originalPlannedV,originalPlannedVol,noShowAdjV,noShowAdjVol,
   receivedV,receivedVol,pendingV:Math.max(0,plannedV-receivedV),pendingVol:remaining,
@@ -1281,8 +1296,8 @@ function render(){
   $('#topUser').textContent=session.name;$('#topRole').textContent=session.role==='receiving'?`${roleName(session.role)} • ${session.operation}`:roleName(session.role);$('#operationBadge').textContent=`Operação ${session.operation}`;$('#operationBadge').style.display=session.role==='receiving'?'':'none';$('#avatar').textContent=session.name.split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase();
   renderNav();
   if(!isVisible(currentPage)) currentPage='dashboard';
-  const fn={dashboard:renderDashboard,patio:renderPatio,receiving:renderReceiving,planning:renderPlanning,priorities:renderPriorities,history:renderHistory,drivers:renderDrivers,docks:renderDocks,admin:renderAdmin,logs:renderLogs}[currentPage];
-  $('#page').innerHTML=fn();bindThemeButton();const pageLabels={dashboard:['Painel Geral','Visão consolidada do recebimento'],patio:['Carros no Pátio','Controle de veículos presentes no pátio'],receiving:['Recebimento','Controle operacional das docas'],planning:['Previsão','Lançamento de veículos, volumes e peso'],priorities:['Prioridades','Veículos prioritários'],history:['Lista / Histórico','Recebimentos finalizados'],drivers:['Motoristas','Cadastro de motoristas e veículos'],docks:['Docas','Controle de disponibilidade'],admin:['Administração','Configurações do CRC'],logs:['Histórico do Sistema','Auditoria completa']};const pl=pageLabels[currentPage]||['CRC','Controle de Recebimento de Coletas'];$('#topPageTitle').textContent=pl[0];$('#topSubtitle').textContent=pl[1];bindPage();updateTimers();
+  const fn={dashboard:renderDashboard,patio:renderPatio,receiving:renderReceiving,planning:renderPlanning,priorities:renderPriorities,history:renderHistory,drivers:renderDrivers,docks:renderDocks,admin:renderAdmin,logs:renderLogs,typologyTimes:renderTypologyTimes}[currentPage];
+  $('#page').innerHTML=fn();bindThemeButton();const pageLabels={dashboard:['Painel Geral','Visão consolidada do recebimento'],patio:['Carros no Pátio','Controle de veículos presentes no pátio'],receiving:['Recebimento','Controle operacional das docas'],planning:['Previsão','Lançamento de veículos, volumes e peso'],priorities:['Prioridades','Veículos prioritários'],history:['Lista / Histórico','Recebimentos finalizados'],drivers:['Motoristas','Cadastro de motoristas e veículos'],docks:['Docas','Controle de disponibilidade'],admin:['Administração','Configurações do CRC'],logs:['Histórico do Sistema','Auditoria completa'],typologyTimes:['Tempo tipologias','Parâmetros de tempo médio por tipo de veículo']};const pl=pageLabels[currentPage]||['CRC','Controle de Recebimento de Coletas'];$('#topPageTitle').textContent=pl[0];$('#topSubtitle').textContent=pl[1];bindPage();updateTimers();
 }
 function showLogin(){
  $('#loginScreen').classList.remove('hidden');$('#app').classList.add('hidden');
@@ -1818,6 +1833,14 @@ function renderDocks(){
  `<div class="grid-2"><div class="panel"><form id="dockForm"><div class="inline"><div><label>Número da doca</label><input id="dockNumber" required placeholder="Ex.: 15"></div><div><button class="btn btn-primary">Adicionar doca</button></div></div></form></div>${dockPanel()}</div>
  <div class="panel"><div class="table-wrap"><table><thead><tr><th>Doca</th><th>Status</th><th>Veículo atual</th><th>Ações</th></tr></thead><tbody>${state.docks.map(d=>{const a=state.active.find(x=>x.dock===d.number);return `<tr><td>Doca ${esc(d.number)}</td><td>${esc(d.status)}</td><td>${a?esc(a.driverName)+' • '+esc(a.plate):'—'}</td><td>${d.status!=='Ocupada'?`<button class="btn btn-soft toggle-dock" data-id="${d.id}">${d.status==='Livre'?'Bloquear':'Liberar'}</button> <button class="btn btn-danger delete-dock" data-id="${d.id}">Excluir</button>`:'Em uso'}</td></tr>`}).join('')}</tbody></table></div></div>`;
 }
+function renderTypologyTimes(){
+ const rows=state.typologies.map(t=>`<tr><td><b>${esc(t.name)}</b></td><td><input class="typ-time" data-name="${esc(t.name)}" type="number" min="1" value="${Number(t.targetMin||0)}" style="width:120px"></td><td>${Number(t.targetMin||0)} min</td></tr>`).join('');
+ return pageHead('Tempo tipologias','Ajuste do tempo médio/meta usado na previsão de término por tipo de veículo.')+
+ `<div class="panel"><div class="panel-title"><h3>Tempo médio por tipologia</h3><span class="small">Edite os minutos conforme a análise real da operação. A previsão de término passa a usar estes tempos.</span></div>
+ <div class="table-wrap"><table><thead><tr><th>Tipologia</th><th>Tempo-meta (min)</th><th>Referência atual</th></tr></thead><tbody>${rows}</tbody></table></div>
+ <p class="small" style="margin-top:12px"><b>Como a estimativa funciona:</b> soma o tempo-meta dos veículos ainda pendentes por tipologia, desconta o tempo já decorrido dos veículos em descarga e divide pela capacidade simultânea da operação. Assim, o card não projeta o saldo inteiro usando somente volumes/minuto.</p></div>`;
+}
+
 function renderAdmin(){
  const storageKB=Math.round(new Blob([JSON.stringify(state)]).size/1024);
  return pageHead('Administração','Usuários, tipologias, integração e manutenção do sistema.')+
@@ -1880,7 +1903,7 @@ function bindPage(){
   $('#driverForm')?.addEventListener('submit',saveDriver);$$('.edit-driver').forEach(b=>b.onclick=()=>editDriver(b.dataset.id));$$('.delete-driver').forEach(b=>b.onclick=()=>deleteDriver(b.dataset.id));$('#deleteAllDriversBtn')?.addEventListener('click',deleteAllDrivers);$('#importDriversBtn')?.addEventListener('click',()=>$('#driversExcelInput')?.click());$('#driversExcelInput')?.addEventListener('change',importDriversExcel);
   $('#dockForm')?.addEventListener('submit',addDock);$$('.toggle-dock').forEach(b=>b.onclick=()=>toggleDock(b.dataset.id));$$('.delete-dock').forEach(b=>b.onclick=()=>deleteDock(b.dataset.id));
   $('#userForm')?.addEventListener('submit',saveUser);$$('.edit-user').forEach(b=>b.onclick=()=>editUser(b.dataset.id));$$('.delete-user').forEach(b=>b.onclick=()=>deleteUser(b.dataset.id));
-  $('#typForm')?.addEventListener('submit',addTypology);$$('.typ-time').forEach(i=>i.onchange=()=>{const t=state.typologies.find(x=>x.name===i.dataset.name);t.targetMin=Number(i.value);log('Alterou tempo-meta',`${t.name}: ${t.targetMin} min`);render()});$$('.delete-typ').forEach(b=>b.onclick=()=>deleteTypology(b.dataset.name));
+  $('#typForm')?.addEventListener('submit',addTypology);$$('.typ-time').forEach(i=>i.onchange=()=>{const t=state.typologies.find(x=>x.name===i.dataset.name);if(!t)return;t.targetMin=Math.max(1,Number(i.value)||1);log('Alterou tempo-meta',`${t.name}: ${t.targetMin} min`,false);save(false);toast(`Tempo de ${t.name} atualizado para ${t.targetMin} min.`,'ok');render()});$$('.delete-typ').forEach(b=>b.onclick=()=>deleteTypology(b.dataset.name));
   $('#supabaseForm')?.addEventListener('submit',saveSupabase);$('#syncNowBtn')?.addEventListener('click',()=>syncCloud(false));$('#restoreInternalBtn')?.addEventListener('click',restoreInternalBackup);
   $('#backupBtn')?.addEventListener('click',backupJSON);$('#clearAllBtn')?.addEventListener('click',clearAll);
 }
