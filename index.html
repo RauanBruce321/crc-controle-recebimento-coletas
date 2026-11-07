@@ -482,7 +482,7 @@ const USE_NORMALIZED_SUPABASE=true;
 const CRC_VALIDATION_INTERVAL_MS=180000; // contingência: 3 min, somente se Realtime cair
 const CRC_BACKGROUND_STALE_MS=15000; // ao voltar à tela, faz só uma checagem leve
 let lastCloudActivityAt=0;
-const nowISO=()=>new Date().toISOString(), brDate=x=>new Date(x).toLocaleString('pt-BR');
+const nowISO=()=>new Date().toISOString(), brDate=x=>{if(typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)){const [y,m,d]=x.split('-');return `${d}/${m}/${y}`}const dt=new Date(x);return Number.isFinite(dt.getTime())?dt.toLocaleString('pt-BR'):'—'};
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const mins=(ms)=>Math.max(0,Math.floor(ms/60000));
@@ -505,7 +505,7 @@ function seed(){
   ];
   const plan=[];
   const drivers=[];
-  const docks=Array.from({length:15},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
+  const docks=Array.from({length:35},(_,i)=>({id:uid(),number:String(i+1).padStart(2,'0'),status:'Livre'}));
   return {version:'13.16.0',users,typologies,plan,drivers,docks,patio:[],active:[],history:[],priorities:[],logs:[],turns:[],settings:{sound:false,supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,supabaseEnabled:true,lastSync:null,autoBackup:true},meta:{createdAt:nowISO(),updatedAt:nowISO(),revision:0}};
 }
 function readStoredState(){
@@ -592,9 +592,9 @@ function normalizeStateShape(target){
  ['users','typologies','plan','drivers','docks','patio','active','history','priorities','logs','turns'].forEach(k=>{if(!Array.isArray(target[k]))target[k]=[]});
  if(!target.typologies.some(t=>String(t?.name||'').trim().toUpperCase()==='HR'))target.typologies.push({name:'HR',targetMin:30});
  target.docks=uniqueDocks(target.docks);
- // CRC V13.5: garante as 15 docas operacionais sem apagar configurações existentes.
+ // CRC: garante 35 docas operacionais sem apagar configurações existentes.
  const dockByNumber=new Map(target.docks.map(d=>[normalizeDockNumber(d.number),d]));
- for(let i=1;i<=15;i++){
+ for(let i=1;i<=35;i++){
   const number=String(i).padStart(2,'0');
   if(!dockByNumber.has(number)){
    const d={id:`dock-${number}`,number,status:'Livre',createdAt:nowISO(),updatedAt:nowISO()};
@@ -1121,19 +1121,18 @@ function renderNav(){
 const CRC_NO_SHOW_ADJUSTMENT_TYPE='__CRC_NO_SHOW_AJUSTE__';
 function isManualNoShowRow(p){return !!p&&(p.isNoShowAdjustment===true||p.typology===CRC_NO_SHOW_ADJUSTMENT_TYPE)}
 function operationalPlanRows(){return (state.plan||[]).filter(p=>!isManualNoShowRow(p))}
-function manualNoShowRecord(){
- const date=operationalPlanDate();
+function manualNoShowRecord(date=operationalPlanDate()){
  return (state.plan||[]).find(p=>isManualNoShowRow(p)&&(!p.date||p.date===date))||null;
 }
-function manualNoShowAdjustment(){
- const p=manualNoShowRecord();
+function manualNoShowAdjustment(date=operationalPlanDate()){
+ const p=manualNoShowRecord(date);
  return {
   vehicles:Math.max(0,Number(p?.noShowVehicles||0)),
   volumes:Math.max(0,Number(p?.noShowVolumes||0))
  };
 }
 function originalPlanTotals(){
- const plan=operationalPlanRows();
+ const plan=operationalPlanRows().filter(p=>p.date===operationalPlanDate());
  return {
   vehicles:plan.reduce((a,b)=>a+Number(b.vehicles||0),0),
   volumes:plan.reduce((a,b)=>a+Number(b.volumes||0),0)
@@ -1160,14 +1159,23 @@ async function applyManualNoShow(e){
  toast('No-show operacional atualizado.','ok');
 }
 
-function stats(){
- const plan=operationalPlanRows();
- const history=state.history;
- const active=state.active;
- const patio=state.patio;
+function productionViewDate(){
+ state.meta=state.meta||{};
+ return state.meta.productionViewDate||localDateKey();
+}
+function setProductionViewDate(date){
+ if(!date)return;
+ state.meta=state.meta||{};state.meta.productionViewDate=date;
+ save(false);render();
+}
+function stats(viewDate=productionViewDate()){
+ const plan=operationalPlanRows().filter(p=>p.date===viewDate);
+ const history=state.history.filter(h=>(h.productionDate||localDateKey(h.startedAt||h.finishedAt))===viewDate);
+ const active=state.active.filter(a=>(a.productionDate||localDateKey(a.startedAt))===viewDate);
+ const patio=state.patio.filter(v=>localDateKey(v.arrivedAt||v.createdAt)===viewDate);
  const originalPlannedV=plan.reduce((a,b)=>a+Number(b.vehicles||0),0);
  const originalPlannedVol=plan.reduce((a,b)=>a+Number(b.volumes||0),0);
- const adj=manualNoShowAdjustment();
+ const adj=manualNoShowAdjustment(viewDate);
  const noShowAdjV=Math.min(originalPlannedV,Math.max(0,Number(adj.vehicles||0)));
  const noShowAdjVol=Math.min(originalPlannedVol,Math.max(0,Number(adj.volumes||0)));
  const plannedV=Math.max(0,originalPlannedV-noShowAdjV);
@@ -1179,7 +1187,7 @@ function stats(){
  // ETA operacional por tipologia: evita projetar o saldo inteiro apenas por volumes/minuto histórico.
  // Cada veículo pendente usa o tempo-meta configurado; a carga é dividida pela capacidade simultânea real.
  const typTarget=name=>Math.max(1,Number(state.typologies.find(t=>String(t.name).toLowerCase()===String(name||'').toLowerCase())?.targetMin||avg||30));
- const cycleDate=operationalPlanDate();
+ const cycleDate=viewDate;
  const plannedByTyp=new Map();
  plan.filter(p=>!p.date||p.date===cycleDate).forEach(p=>plannedByTyp.set(p.typology,(plannedByTyp.get(p.typology)||0)+Number(p.vehicles||0)));
  const completedByTyp=new Map(); history.forEach(h=>completedByTyp.set(h.typology,(completedByTyp.get(h.typology)||0)+1));
@@ -1195,8 +1203,8 @@ function stats(){
   plannedV,plannedVol,originalPlannedV,originalPlannedVol,noShowAdjV,noShowAdjVol,
   receivedV,receivedVol,pendingV:Math.max(0,plannedV-receivedV),pendingVol:remaining,
   active:active.length,patio:patio.length,activeHC,avg,eta,
-  free:state.docks.filter(d=>d.status==='Livre').length,
-  busy:state.docks.filter(d=>d.status==='Ocupada').length
+  free:Math.max(0,Math.min(15,uniqueDocks(state.docks).filter(d=>Number(d.number)<=15&&d.status!=='Bloqueada').length)-active.length),
+  busy:active.length
  };
 }
 function waitingPriorities(){
@@ -1303,10 +1311,11 @@ function showLogin(){
  $('#loginScreen').classList.remove('hidden');$('#app').classList.add('hidden');
  const u=$('#loginUser'),p=$('#loginPass');if(u)u.value='';if(p)p.value='';
 }
-function dockPanel(){
+function dockPanel(date=null){
  const docks=uniqueDocks(state.docks);
- return `<div class="panel"><div class="panel-title"><h3>Farol das docas</h3><span class="small">Livre • Ocupada • Bloqueada</span></div><div class="dock-grid">${
-  docks.map(d=>{const a=state.active.find(x=>normalizeDockNumber(x.dock)===d.number);const priorityClass=a?.priority?' priority':'';return `<div class="dock ${d.status==='Livre'?'free':d.status==='Ocupada'?'busy':'blocked'}${priorityClass}"><strong>Doca ${esc(d.number)}${a?.priority?' • 🚨 PRIORIDADE':''}</strong><small>${esc(d.status)}</small>${a?`<small>${esc(a.driverName)} • ${esc(a.typology)}</small><small>${esc(a.operation)}</small>`:''}</div>`}).join('')
+ const dateActive=date?state.active.filter(a=>(a.productionDate||localDateKey(a.startedAt))===date):state.active;
+ return `<div class="panel"><div class="panel-title"><h3>Farol das docas</h3><span class="small">${date?`Veículos da previsão ${brDate(date)}`:'Livre • Ocupada • Bloqueada'}</span></div><div class="dock-grid">${
+  docks.map(d=>{const a=dateActive.find(x=>normalizeDockNumber(x.dock)===d.number);const other=date?state.active.find(x=>normalizeDockNumber(x.dock)===d.number&&(x.productionDate||localDateKey(x.startedAt))!==date):null;const blocked=d.status==='Bloqueada';const status=blocked?'Bloqueada':a?'Ocupada':other?`Ocupada • outra previsão ${brDate(other.productionDate||localDateKey(other.startedAt))}`:'Livre';const priorityClass=a?.priority?' priority':'';return `<div class="dock ${blocked?'blocked':a||other?'busy':'free'}${priorityClass}"><strong>Doca ${esc(d.number)}${a?.priority?' • 🚨 PRIORIDADE':''}</strong><small>${esc(status)}</small>${a?`<small>${esc(a.driverName)} • ${esc(a.typology)}</small><small>${esc(a.operation)}</small>`:''}</div>`}).join('')
  }</div></div>`;
 }
 function performanceTable(){
@@ -1321,22 +1330,24 @@ function localDateKey(value){
  if(!Number.isFinite(d.getTime()))return String(value||'').slice(0,10);
  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
-function operationalPlanDate(){
+function operationalPlanDate(requestedDate=productionViewDate()){
+ const viewDate=requestedDate;
+ if(operationalPlanRows().some(p=>p.date===viewDate))return viewDate;
  if(state.meta?.cyclePlanDate&&operationalPlanRows().some(p=>p.date===state.meta.cyclePlanDate))return state.meta.cyclePlanDate;
  const dates=[...new Set(operationalPlanRows().map(p=>p.date).filter(Boolean))].sort();
  const date=dates[0]||localDateKey();
  state.meta=state.meta||{};if(dates.length)state.meta.cyclePlanDate=date;
  return date;
 }
-function currentNoShowRows(){
- const cycleDate=operationalPlanDate();
+function currentNoShowRows(requestedDate=operationalPlanDate()){
+ const cycleDate=requestedDate;
  const names=[...new Set([...state.typologies.map(t=>t.name),...operationalPlanRows().filter(p=>p.date===cycleDate).map(p=>p.typology)])];
  return names.map(name=>{
   const planned=operationalPlanRows().filter(p=>p.date===cycleDate&&p.typology===name).reduce((sum,p)=>sum+Number(p.vehicles||0),0);
-  const completed=state.history.filter(h=>h.typology===name).length;
+  const completed=state.history.filter(h=>(h.productionDate||localDateKey(h.startedAt||h.finishedAt))===cycleDate&&h.typology===name).length;
   const noShow=Math.max(0,planned-completed),pct=planned?Math.round(noShow/planned*100):0;
   const plannedVls=operationalPlanRows().filter(p=>p.date===cycleDate&&p.typology===name).reduce((sum,p)=>sum+Number(p.volumes||0),0);
-  const receivedVls=state.history.filter(h=>h.typology===name).reduce((sum,h)=>sum+Number(h.receivedVolumes||h.volumes||0),0);
+  const receivedVls=state.history.filter(h=>(h.productionDate||localDateKey(h.startedAt||h.finishedAt))===cycleDate&&h.typology===name).reduce((sum,h)=>sum+Number(h.receivedVolumes||h.volumes||0),0);
   const noShowVls=Math.max(0,plannedVls-receivedVls),pctVls=plannedVls?Math.round(noShowVls/plannedVls*100):0;
   return {name,planned,completed,noShow,pct,plannedVls,receivedVls,noShowVls,pctVls};
  }).filter(r=>r.planned>0||r.completed>0||r.plannedVls>0||r.receivedVls>0);
@@ -1359,7 +1370,10 @@ function noShowPanel(){
  return `<div class="panel no-show-panel"><div class="panel-title"><h3>No-show por tipologia — ciclo ${esc(cycleDate)}</h3></div><div class="table-wrap"><table><thead><tr><th>Tipologia</th><th>Previsto</th><th>Concluído</th><th>No-show</th><th>% No-show</th><th>VLS Prev.</th><th>VLS Rec.</th><th>VLS No-show</th><th>% VLS</th></tr></thead><tbody>${body}</tbody>${total}</table></div></div>`;
 }
 function renderDashboard(){
- return pageHead('Painel Geral','Visão consolidada de todas as operações.') + kpis()+dockPanel()+activeCards(false)+noShowPanel();
+ const vd=productionViewDate();
+ const launchedDates=[...new Set((state.plan||[]).map(p=>p.date).filter(Boolean))].sort();
+ const dateControls=launchedDates.length>=2?launchedDates.map(d=>`<button class="btn ${d===vd?'btn-primary':'btn-soft'}" data-view-date="${d}">Ver ${brDate(d)}</button>`).join(''):'';
+ return pageHead('Painel Geral',`Visão operacional da previsão ${brDate(vd)}. Os indicadores e os veículos nas docas seguem a data selecionada.`,dateControls) + kpis()+dockPanel(vd)+activeCards(false,vd)+noShowPanel();
 }
 function alerts(){
  const out=[];const t=Date.now();
@@ -1486,9 +1500,10 @@ async function deleteActiveAdmin(id){
  }
 }
 
-function activeCards(showFinalize=true){
- return `<div class="panel"><div class="panel-title"><h3>Veículos atuais nas docas</h3><span class="small">${state.active.length} em descarregamento</span></div><div class="vehicle-grid">${
- state.active.length?state.active.sort((a,b)=>a.dock.localeCompare(b.dock)).map(a=>{
+function activeCards(showFinalize=true,date=null){
+ const activeList=date?state.active.filter(a=>(a.productionDate||localDateKey(a.startedAt))===date):state.active;
+ return `<div class="panel"><div class="panel-title"><h3>Veículos atuais nas docas</h3><span class="small">${activeList.length} em descarregamento${date?` • previsão ${brDate(date)}`:''}</span></div><div class="vehicle-grid">${
+ activeList.length?activeList.slice().sort((a,b)=>a.dock.localeCompare(b.dock)).map(a=>{
    const started=parseOperationalTime(a.startedAt),elapsed=Number.isFinite(started)?mins(Date.now()-started):0;const pct=Math.min(100,Math.round(elapsed/a.targetMin*100));const cls=pct>=100?'over':pct>=80?'danger':pct>=50?'warn':'';
    return `<article class="vehicle-card ${a.priority?'priority':''}" data-active="${a.id}"><div class="vc-head"><span class="badge ${a.priority?'badge-red':'badge-blue'}">${a.priority?'🚨 PRIORIDADE':'DOCA '+esc(a.dock)}</span><span class="badge badge-purple">${esc(a.operation)}</span>${['tower','receiving'].includes(session?.role)?`<div class="active-admin-wrap"><button class="active-admin-dots" type="button" data-active-dots="${a.id}" aria-label="Opções">⋯</button><div class="active-admin-popup hidden"><button type="button" data-active-edit="${a.id}">Editar</button><button type="button" class="danger" data-active-delete="${a.id}">Excluir</button></div></div>`:''}</div><div class="vc-body"><h4>${esc(a.driverName)}</h4><p>${esc(a.typology)} • ${esc(a.plate)} • Cavalo ${esc(a.horse)}</p><p><b>Previsto:</b> ${a.expectedVolumes.toLocaleString('pt-BR')} volumes • <b>HC:</b> ${Number(a.hc||1)}</p><div class="timer" data-start="${a.startedAt}">00:00:00</div><div class="progress ${cls}"><span style="width:${pct}%"></span></div><p>Meta: ${a.targetMin} min • Início: ${new Date(a.startedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p>${showFinalize&&can('admin','leader','receiving')?`<div class="card-actions"><button class="btn btn-primary finalize-btn" data-id="${a.id}">Finalizar</button><button class="btn btn-primary share-start-photo" data-id="${a.id}" title="Compartilhar início no WhatsApp" aria-label="Compartilhar início no WhatsApp"><svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M16 3a13 13 0 0 0-11.1 19.8L3 29l6.4-1.7A13 13 0 1 0 16 3Zm0 23.6c-2 0-3.9-.5-5.6-1.5l-.4-.2-3.8 1 1-3.7-.3-.4A10.6 10.6 0 1 1 16 26.6Zm5.8-7.9c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.2-.2.2-.3.2-.7.1-1.8-.9-3-1.6-4.2-3.6-.3-.5.3-.5.9-1.6.1-.2.1-.4 0-.6-.1-.2-.7-1.7-1-2.3-.3-.7-.6-.6-.8-.6h-.7c-.2 0-.6.1-.9.4-.3.3-1.2 1.2-1.2 2.9s1.2 3.3 1.4 3.6c.2.2 2.4 3.7 5.9 5.2.8.4 1.5.6 2 .7.8.3 1.6.2 2.2.1.7-.1 1.9-.8 2.2-1.5.3-.7.3-1.4.2-1.5-.1-.1-.3-.2-.6-.3Z"/></svg></button></div>`:''}</div></article>`
  }).join(''):`<div class="small">Nenhum veículo em descarregamento agora.</div>`}</div></div>`;
@@ -1772,6 +1787,7 @@ function renderReceiving(){
  <div><label>Cavalo</label><input id="driverHorseView" placeholder="Automático — pode corrigir"></div>
  <div><label>Tipologia</label><input id="driverTypView" placeholder="Automático — pode corrigir"></div>
  <div><label>Doca</label><select id="dockSelect" required><option value="">Selecione...</option>${state.docks.filter(d=>d.status==='Livre').map(d=>`<option>${esc(d.number)}</option>`).join('')}</select></div>
+ <div><label>Data da previsão / produção</label><input id="receivingProductionDate" type="date" value="${localDateKey()}" required><small class="small">Escolha a data da previsão a que este carro pertence.</small></div>
  <div><label>Operação</label><input value="${esc(session.operation)}" class="readonly-field" readonly></div>
  <div><label>HC na doca</label><input id="hcCount" type="number" min="1" max="30" value="2" required></div>
  <div><label>Foto do veículo aberto</label><button id="openStartCameraBtn" class="btn btn-primary photo-button" type="button">📷 Abrir câmera</button><input id="startPhotoData" type="hidden"></div>
@@ -1779,32 +1795,35 @@ function renderReceiving(){
  </div></form></div>
  ${activeCards(true)}`;
 }
-function planBalance(typology){
- const p=operationalPlanRows().filter(x=>x.typology===typology).reduce((a,b)=>({vehicles:a.vehicles+b.vehicles,volumes:a.volumes+b.volumes,weight:a.weight+b.weight}),{vehicles:0,volumes:0,weight:0});
- const done=state.history.filter(x=>x.typology===typology).length+state.active.filter(x=>x.typology===typology).length;
- const used=state.history.filter(x=>x.typology===typology).reduce((a,b)=>a+b.receivedVolumes,0)+state.active.filter(x=>x.typology===typology).reduce((a,b)=>a+b.expectedVolumes,0);
+function planBalance(typology,date=productionViewDate()){
+ const viewDate=date;
+ const p=operationalPlanRows().filter(x=>x.date===viewDate&&x.typology===typology).reduce((a,b)=>({vehicles:a.vehicles+b.vehicles,volumes:a.volumes+b.volumes,weight:a.weight+b.weight}),{vehicles:0,volumes:0,weight:0});
+ const done=state.history.filter(x=>(x.productionDate||localDateKey(x.startedAt||x.finishedAt))===viewDate&&x.typology===typology).length+state.active.filter(x=>(x.productionDate||localDateKey(x.startedAt))===viewDate&&x.typology===typology).length;
+ const used=state.history.filter(x=>(x.productionDate||localDateKey(x.startedAt||x.finishedAt))===viewDate&&x.typology===typology).reduce((a,b)=>a+b.receivedVolumes,0)+state.active.filter(x=>(x.productionDate||localDateKey(x.startedAt))===viewDate&&x.typology===typology).reduce((a,b)=>a+b.expectedVolumes,0);
  const remV=Math.max(0,p.vehicles-done),remVol=Math.max(0,p.volumes-used);
  return {expected:p.vehicles<=0?0:(remV?Math.max(0,Math.round(remVol/remV)):0),...p};
 }
 function renderPlanning(){
  const adj=manualNoShowAdjustment(),orig=originalPlanTotals();
- return pageHead('Previsão','Lançamento da programação do ciclo operacional. O ciclo pode atravessar a madrugada até a Torre finalizá-lo.',
- `<button id="closeDayBtn" class="btn btn-danger">📥 Finalizar ciclo, baixar e zerar</button>`) +
+ const launchedDates=[...new Set((state.plan||[]).map(p=>p.date).filter(Boolean))].sort();
+ const closeDate=launchedDates.includes(productionViewDate())?productionViewDate():(launchedDates[launchedDates.length-1]||localDateKey());
+ return pageHead('Previsão','Lance previsões por data. Use a data do lançamento para separar a produção de ontem e de hoje.',
+ `<div class="inline" style="align-items:center;gap:8px;flex-wrap:wrap"><label for="closeProductionDatePicker" style="margin:0">Data para finalizar</label><input id="closeProductionDatePicker" type="date" value="${closeDate}" required style="max-width:170px"><button id="closeDayBtn" class="btn btn-danger">📥 Finalizar, baixar e zerar</button></div>`) +
  `<div class="panel"><div class="panel-title"><h3>Ajuste de No-show confirmado</h3><span class="small">Abate somente os indicadores operacionais gerais. Não altera o No-show por tipologia.</span></div>
  <form id="manualNoShowForm"><div class="form-grid">
  <div><label>Carros confirmados como No-show</label><input id="manualNoShowVehicles" type="number" min="0" max="${orig.vehicles}" value="${adj.vehicles}" required></div>
  <div><label>Volumes confirmados como No-show</label><input id="manualNoShowVolumes" type="number" min="0" max="${orig.volumes}" value="${adj.volumes}" required></div>
  <div style="align-self:end"><button class="btn btn-primary" type="submit">Aplicar No-show</button></div>
  </div></form></div>
- <div class="panel"><div class="panel-title"><h3>Novo lançamento manual</h3></div><form id="planForm"><div class="form-grid">
- <div><label>Data</label><input id="planDate" type="date" value="${new Date().toISOString().slice(0,10)}" required></div>
+ <div class="panel"><div class="panel-title"><h3>Novo lançamento manual</h3><button class="btn btn-soft" id="usePlanDateBtn" type="button">Exibir esta data no painel</button></div><form id="planForm"><div class="form-grid">
+ <div><label>Data</label><input id="planDate" type="date" value="${localDateKey()}" required></div>
  <div><label>Tipologia</label><select id="planTyp" required>${state.typologies.map(t=>`<option>${esc(t.name)}</option>`).join('')}</select></div>
  <div><label>Veículos previstos</label><input id="planVehicles" type="number" min="1" required></div>
  <div><label>Volumes previstos</label><input id="planVolumes" type="number" min="1" required></div>
  <div><label>Peso previsto</label><input id="planWeight" type="number" min="0" step="0.01" required></div>
  <div style="align-self:end"><button class="btn btn-primary" type="submit">Adicionar previsão</button></div>
  </div></form></div>
- <div class="panel"><div class="panel-title"><h3>Previsão lançada</h3><span class="small">Somente a previsão operacional do dia</span></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipologia</th><th>Veículos</th><th>Volumes</th><th>Peso</th><th>Média por carro</th><th>Ação</th></tr></thead><tbody>${operationalPlanRows().map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.typology)}</td><td>${p.vehicles}</td><td>${p.volumes.toLocaleString('pt-BR')}</td><td>${Number(p.weight).toLocaleString('pt-BR')}</td><td>${p.vehicles?Math.round(p.volumes/p.vehicles):0}</td><td><button class="btn btn-danger delete-plan" data-id="${p.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>`+noShowPanel();
+ <div class="panel"><div class="panel-title"><h3>Previsão lançada</h3><span class="small">Previsões agrupadas por data; cada dia tem sua própria produção no painel</span></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipologia</th><th>Veículos</th><th>Volumes</th><th>Peso</th><th>Média por carro</th><th>Ação</th></tr></thead><tbody>${operationalPlanRows().map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.typology)}</td><td>${p.vehicles}</td><td>${p.volumes.toLocaleString('pt-BR')}</td><td>${Number(p.weight).toLocaleString('pt-BR')}</td><td>${p.vehicles?Math.round(p.volumes/p.vehicles):0}</td><td><button class="btn btn-danger delete-plan" data-id="${p.id}">Excluir</button></td></tr>`).join('')}</tbody></table></div></div>`+noShowPanel();
 }
 function renderPriorities(){
  const available=state.drivers.filter(d=>d.status==='Ativo'&&driverAvailableForNewAction(d)).sort((a,b)=>a.name.localeCompare(b.name));
@@ -1880,7 +1899,10 @@ function bindPage(){
   $$('[data-active-edit]').forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();openActiveAdminEditor(b.dataset.activeEdit)});
   $$('[data-active-delete]').forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();deleteActiveAdmin(b.dataset.activeDelete)});
   $$('.view-start-photo').forEach(b=>b.onclick=()=>showActivePhoto(b.dataset.id));$$('.share-start-photo').forEach(b=>b.onclick=()=>shareActiveStart(b.dataset.id));
-  $('#planForm')?.addEventListener('submit',addPlan);$('#manualNoShowForm')?.addEventListener('submit',applyManualNoShow);$('#closeDayBtn')?.addEventListener('click',closeOperationalDay);
+  $('#planForm')?.addEventListener('submit',addPlan);$('#manualNoShowForm')?.addEventListener('submit',applyManualNoShow);$('#closeDayBtn')?.addEventListener('click',closeProductionDate);
+  $('#usePlanDateBtn')?.addEventListener('click',()=>{const d=$('#planDate')?.value;if(d){setProductionViewDate(d);toast('Painel exibindo '+brDate(d)+'.','ok')}});
+  $$('[data-view-date]').forEach(b=>b.onclick=()=>setProductionViewDate(b.dataset.viewDate));
+  $('#dashboardViewDate')?.addEventListener('change',e=>setProductionViewDate(e.target.value));
 
   $$('.delete-plan').forEach(b=>b.onclick=async()=>{
     const id=b.dataset.id;
@@ -2006,6 +2028,9 @@ async function startReceiving(e){
   const driver=driverById($('#driverSelect').value),dock=$('#dockSelect').value,photo=$('#startPhotoData').value,hc=Math.max(1,Number($('#hcCount')?.value||1));
   if(!driver||!dock||!photo)return toast('Preencha motorista, doca e registre a foto inicial.','error');
 
+  const productionDate=$('#receivingProductionDate')?.value||localDateKey();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(productionDate))return toast('Selecione a data da previsão deste carro.','error');
+
   const correctedPlate=normalizeDriverPlate($('#driverPlateView')?.value||driver.plate);
   const correctedHorse=normalizeDriverPlate($('#driverHorseView')?.value||driver.horse)||'S/N';
   const correctedTyp=String($('#driverTypView')?.value||driver.typology).trim();
@@ -2024,7 +2049,7 @@ async function startReceiving(e){
   if(submit){submit.disabled=true;submit.textContent='Confirmando no Supabase...'}
 
   const driverUpdated={...driver,plate:correctedPlate||driver.plate,horse:correctedHorse,typology:correctedTyp||driver.typology,updatedAt:nowISO()};
-  const balance=planBalance(driverUpdated.typology),target=state.typologies.find(t=>t.name===driverUpdated.typology)?.targetMin||30;
+  const balance=planBalance(driverUpdated.typology,productionDate),target=state.typologies.find(t=>t.name===driverUpdated.typology)?.targetMin||30;
 
   // PRIORIDADE NÃO BLOQUEIA A DESCARGA. Ela é consumida quando o descarregamento inicia.
   const pr=(state.priorities||[]).find(p=>p.status==='Aguardando'&&(sameId(p.driverId,driverUpdated.id)||normalizeDriverPlate(p.plate)===normalizeDriverPlate(driverUpdated.plate)))||null;
@@ -2038,7 +2063,7 @@ async function startReceiving(e){
   const activeRecord={
    id:activeId,driverId:driverUpdated.id,driverName:driverUpdated.name,plate:driverUpdated.plate,horse:driverUpdated.horse,
    typology:driverUpdated.typology,dock:dockNorm,operation:session.operation,expectedVolumes:balance.expected,targetMin:target,
-   startedAt,startPhotoPath,priority:!!pr,priorityId:pr?.id||null,priorityReason:pr?.reason||'',sourcePatioIds,
+   productionDate,startedAt,startPhotoPath,priority:!!pr,priorityId:pr?.id||null,priorityReason:pr?.reason||'',sourcePatioIds,
    updatedAt:startedAt,operator:session.name,hc,lastOvertimeAlert:0
   };
 
@@ -2497,19 +2522,20 @@ function reportGreeting(){
  const h=new Date().getHours();
  return h>=5&&h<12?'Bom dia!':h>=12&&h<18?'Boa tarde!':'Boa noite!';
 }
-function reportCanvas(){
- const W=1200,H=1800,c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
+function reportCanvas(reportDate=productionViewDate()){
+ const W=1200,H=2400,c=document.create('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
  x.fillStyle='#f4f7fb';x.fillRect(0,0,W,H);
  const box=(px,py,pw,ph,title)=>{x.fillStyle='#fff';x.strokeStyle='#dbe3ee';x.lineWidth=2;x.beginPath();x.roundRect(px,py,pw,ph,18);x.fill();x.stroke();x.fillStyle='#10204b';x.font='bold 28px Arial';x.fillText(title,px+22,py+38)};
  x.fillStyle='#10204b';x.font='bold 40px Arial';x.fillText('CRC • Report Operacional',45,58);
- x.font='22px Arial';x.fillStyle='#475569';x.fillText(new Date().toLocaleString('pt-BR'),45,94);
+ x.font='22px Arial';x.fillStyle='#475569';x.fillText('Previsão: '+brDate(reportDate)+' • '+new Date().toLocaleString('pt-BR'),45,94);
 
- // Painel 1 - 15 docas
- box(35,125,1130,520,'1. Veículos nas Docas');
- const by=new Map(uniqueDocks(state.docks).map(d=>[normalizeDockNumber(d.number),d]));
+ // Painel 1 - 15 docas, somente veículos da previsão selecionada
+ box(35,125,1130,560,'1. Veículos nas Docas — '+brDate(reportDate));
+ const by=new Map(uniqueDocks(state.docks).filter(d=>Number(d.number)<=15).map(d=>[normalizeDockNumber(d.number),d]));
+ const reportActive=state.active.filter(v=>(v.productionDate||localDateKey(v.startedAt))===reportDate);
  for(let i=0;i<15;i++){
   const col=i%5,row=Math.floor(i/5),dx=55+col*218,dy=185+row*145,dn=String(i+1).padStart(2,'0');
-  const d=by.get(dn)||{number:dn,status:'Livre'},a=state.active.find(v=>normalizeDockNumber(v.dock)===dn);
+  const d=by.get(dn)||{number:dn,status:'Livre'},a=reportActive.find(v=>normalizeDockNumber(v.dock)===dn);
   x.fillStyle=a?'#fff7ed':d.status==='Bloqueada'?'#f1f5f9':'#f0fdf4';x.strokeStyle=a?'#fdba74':d.status==='Bloqueada'?'#cbd5e1':'#86efac';
   x.beginPath();x.roundRect(dx,dy,200,126,12);x.fill();x.stroke();
   x.fillStyle='#10204b';x.font='bold 18px Arial';x.fillText('DOCA '+dn,dx+12,dy+24);
@@ -2519,8 +2545,8 @@ function reportCanvas(){
  }
 
  // Painel 2 - indicadores
- box(35,670,1130,430,'2. Indicadores Operacionais');
- const s=stats(),k=[
+ box(35,720,1130,430,'2. Indicadores Operacionais — '+brDate(reportDate));
+ const s=stats(reportDate),k=[
   {label:'Carros previstos',value:s.plannedV,minus:s.noShowAdjV},
   {label:'Carros recebidos',value:s.receivedV},
   {label:'Pendentes',value:s.pendingV},
@@ -2535,7 +2561,7 @@ function reportCanvas(){
   {label:'Tempo médio',value:s.avg+' min'}
  ];
  k.forEach((it,i)=>{
-  const col=i%4,row=Math.floor(i/4),kx=55+col*272,ky=730+row*105;
+  const col=i%4,row=Math.floor(i/4),kx=55+col*272,ky=780+row*105;
   x.fillStyle='#f8fafc';x.strokeStyle='#e2e8f0';x.beginPath();x.roundRect(kx,ky,250,86,10);x.fill();x.stroke();
   x.fillStyle='#64748b';x.font='14px Arial';x.fillText(it.label,kx+14,ky+25);
   if(Number(it.minus||0)>0){x.fillStyle='#dc2626';x.font='bold 15px Arial';x.textAlign='right';x.fillText('− '+Number(it.minus).toLocaleString('pt-BR'),kx+236,ky+25);x.textAlign='left'}
@@ -2543,15 +2569,15 @@ function reportCanvas(){
  });
 
  // Painel 3 - no-show
- box(35,1125,1130,620,'3. No-show • Ciclo '+operationalPlanDate());
- const rows=currentNoShowRows().slice(0,12),tot=currentNoShowTotals(currentNoShowRows());
+ box(35,1180,1130,620,'3. No-show • Previsão '+brDate(reportDate));
+ const allRows=currentNoShowRows(reportDate),rows=allRows.slice(0,12),tot=currentNoShowTotals(allRows);
  x.font='bold 13px Arial';x.fillStyle='#10204b';
  const cols=[55,275,365,455,545,650,780,910,1040],heads=['Tipologia','Prev.','Concl.','No-show','% NS','VLS Prev.','VLS Rec.','VLS NS','% VLS'];
- heads.forEach((h,i)=>x.fillText(h,cols[i],1185));
+ heads.forEach((h,i)=>x.fillText(h,cols[i],1240));
  x.font='13px Arial';
- rows.forEach((r,i)=>{const y=1220+i*40;x.fillStyle=i%2?'#f8fafc':'#fff';x.fillRect(50,y-24,1095,36);x.fillStyle='#1e293b';const vals=[r.name,r.planned,r.completed,r.noShow,r.pct+'%',r.plannedVls,r.receivedVls,r.noShowVls,r.pctVls+'%'];vals.forEach((v,j)=>x.fillText(String(v).slice(0,j===0?25:12),cols[j],y))});
+ rows.forEach((r,i)=>{const y=1275+i*40;x.fillStyle=i%2?'#f8fafc':'#fff';x.fillRect(50,y-24,1095,36);x.fillStyle='#1e293b';const vals=[r.name,r.planned,r.completed,r.noShow,r.pct+'%',r.plannedVls,r.receivedVls,r.noShowVls,r.pctVls+'%'];vals.forEach((v,j)=>x.fillText(String(v).slice(0,j===0?25:12),cols[j],y))});
  if(rows.length){
-  const y=1220+rows.length*40;
+  const y=1275+rows.length*40;
   x.fillStyle='#e8eef8';x.fillRect(50,y-24,1095,38);
   x.fillStyle='#10204b';x.font='bold 13px Arial';
   const vals=['TOTAL',tot.planned,tot.completed,tot.noShow,tot.pct+'%',tot.plannedVls,tot.receivedVls,tot.noShowVls,tot.pctVls+'%'];
@@ -2561,10 +2587,16 @@ function reportCanvas(){
 }
 async function sharePanelsReport(){
  try{
-  const canvas=reportCanvas(),blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png',0.95));
+  const dates=[...new Set([...(state.plan||[]).map(p=>p.date),...state.active.map(a=>a.productionDate||localDateKey(a.startedAt)),...state.history.map(h=>h.productionDate||localDateKey(h.startedAt||h.finishedAt))].filter(Boolean))].sort();
+  if(!dates.length)return toast('Não há previsões ou movimentações para gerar relatório.','error');
+  const options=dates.map((d,i)=>`${i+1} — ${brDate(d)}`).join('\n');
+  let choice=dates[0];
+  if(dates.length>1){const answer=prompt('Qual previsão deseja enviar?\n\n'+options+'\n\nDigite o número da opção:');if(answer===null)return;const index=Number(answer)-1;if(!Number.isInteger(index)||index<0||index>=dates.length)return toast('Opção inválida. Gere o relatório novamente e escolha uma previsão da lista.','error');choice=dates[index];}
+  const reportDate=choice;
+  const canvas=reportCanvas(reportDate),blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png',0.95));
   if(!blob)throw new Error('Não foi possível gerar a imagem.');
-  const file=new File([blob],`CRC_Report_${localDateKey()}.png`,{type:'image/png'});
-  const text=`${reportGreeting()}\n\nSegue Report atual do CRC.\n\nOperação: ${session?.operation||'Geral'}\nAtualizado em ${new Date().toLocaleString('pt-BR')}`;
+  const file=new File([blob],`CRC_Report_${reportDate}.png`,{type:'image/png'});
+  const text=`${reportGreeting()}\n\nSegue Report da previsão ${brDate(reportDate)}.\n\nOperação: ${session?.operation||'Geral'}\nAtualizado em ${new Date().toLocaleString('pt-BR')}`;
   if(navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){
    await navigator.share({title:'CRC • Report Operacional',text,files:[file]});
    return;
@@ -2668,7 +2700,7 @@ async function closeOperationalDay(){
 }
 
 let addingPlan=false;
-function addPlan(e){e.preventDefault();if(addingPlan)return;const btn=e.currentTarget?.querySelector('button[type="submit"]');const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);state.meta=state.meta||{};if(!state.meta.cyclePlanDate&&date)state.meta.cyclePlanDate=date;if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');addingPlan=true;if(btn)btn.disabled=true;try{const duplicate=state.plan.some(x=>x.date===date&&x.typology===typology&&Number(x.vehicles)===vehicles&&Number(x.volumes)===volumes&&Number(x.weight||0)===weight&&(Date.now()-new Date(x.createdAt||0).getTime())<5000);if(duplicate)return toast('Este lançamento já foi registrado.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(false);e.currentTarget.reset();$('#planDate').value=new Date().toISOString().slice(0,10);render();if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),250)}toast('Programação cadastrada.','ok')}finally{addingPlan=false;if(btn&&document.body.contains(btn))btn.disabled=false}}
+function addPlan(e){e.preventDefault();if(addingPlan)return;const btn=e.currentTarget?.querySelector('button[type="submit"]');const date=$('#planDate')?.value,typology=$('#planTyp')?.value,vehicles=Number($('#planVehicles')?.value),volumes=Number($('#planVolumes')?.value),weight=Number($('#planWeight')?.value||0);state.meta=state.meta||{};if(!state.meta.cyclePlanDate&&date)state.meta.cyclePlanDate=date;if(!date||!typology||!Number.isFinite(vehicles)||vehicles<=0||!Number.isFinite(volumes)||volumes<=0||!Number.isFinite(weight)||weight<0)return toast('Preencha corretamente todos os campos da programação.','error');addingPlan=true;if(btn)btn.disabled=true;try{const duplicate=state.plan.some(x=>x.date===date&&x.typology===typology&&Number(x.vehicles)===vehicles&&Number(x.volumes)===volumes&&Number(x.weight||0)===weight&&(Date.now()-new Date(x.createdAt||0).getTime())<5000);if(duplicate)return toast('Este lançamento já foi registrado.','error');const at=nowISO();state.plan.push({id:uid(),date,typology,vehicles,volumes,weight,createdAt:at,updatedAt:at});state.meta.productionViewDate=date;log('Lançou previsão',`${typology} • ${vehicles} veículos • ${volumes} volumes`,false);save(false);e.currentTarget.reset();$('#planDate').value=localDateKey();render();if(state.settings.supabaseEnabled){clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud(true),250)}toast('Programação cadastrada.','ok')}finally{addingPlan=false;if(btn&&document.body.contains(btn))btn.disabled=false}}
 
 
 async function savePriorityDirect(p){
@@ -2724,6 +2756,34 @@ async function addPriority(e){
 }
 
 function filterHistory(){const q=$('#historySearch').value.toLowerCase(),op=$('#historyOperation').value;$$('#historyTable tbody tr').forEach(tr=>tr.style.display=(!q||tr.innerText.toLowerCase().includes(q))&&(!op||tr.innerText.includes(op))?'':'none')}
+function exportExcelForDate(date){
+ const records=state.history.filter(h=>(h.productionDate||localDateKey(h.startedAt||h.finishedAt))===date);
+ const rows=records.map(h=>({Data:brDate(h.finishedAt),Motorista:h.driverName,Placa:h.plate,Cavalo:h.horse,Tipologia:h.typology,Operação:h.operation,Doca:h.dock,HC:Number(h.hc||1),'Volumes previstos':h.expectedVolumes,'Volumes recebidos':h.receivedVolumes,Diferença:h.receivedVolumes-h.expectedVolumes,'Início':brDate(h.startedAt),'Fim':brDate(h.finishedAt),'Tempo (min)':h.durationMin,'Foto inicial':h.photoStartCode,'Foto final':h.photoEndCode,Observação:h.observation}));
+ const ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(wb,ws,'Producao '+date);
+ XLSX.writeFile(wb,`CRC_Producao_${date}.xlsx`);
+}
+async function closeProductionDate(){
+ const date=$('#closeProductionDatePicker')?.value||'';
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return toast('Selecione no calendário a data que deseja finalizar.','error');
+ const launchedDates=[...new Set((state.plan||[]).map(p=>p.date).filter(Boolean))];
+ if(!launchedDates.includes(date))return toast('Não existe previsão lançada para a data selecionada. Escolha uma data válida.','error');
+ const active=state.active.filter(a=>(a.productionDate||localDateKey(a.startedAt))===date);
+ if(active.length)return toast(`Ainda existem ${active.length} veículo(s) da data ${brDate(date)} em doca. Finalize-os antes de limpar esta data.`,'error',9000);
+ if(!confirm(`Finalizar somente a data ${brDate(date)}? Será baixado o Excel dessa data e removidas apenas a previsão e a produção finalizada desse dia. As outras datas serão mantidas.`))return;
+ exportExcelForDate(date);
+ const records=state.history.filter(h=>(h.productionDate||localDateKey(h.startedAt||h.finishedAt))===date);
+ const at=nowISO();
+ state.turns.unshift({id:uid(),closedAt:at,closedBy:session.name,operation:session.operation,count:records.length,records:JSON.parse(JSON.stringify(records)),updatedAt:at,date});
+ state.history=state.history.filter(h=>(h.productionDate||localDateKey(h.startedAt||h.finishedAt))!==date);
+ state.plan=state.plan.filter(p=>p.date!==date);
+ if(state.meta?.cyclePlanDate===date)state.meta.cyclePlanDate=null;
+ state.meta.productionViewDate=launchedDates.filter(d=>d!==date).sort().slice(-1)[0]||localDateKey();
+ log('Finalizou data operacional',`${date} • ${records.length} produção(ões) arquivadas`,false);
+ save(false);render();
+ const ok=await syncCloud(true);
+ toast(ok?`Data ${brDate(date)} arquivada. As outras datas e veículos em operação foram mantidos.`:`Data ${brDate(date)} arquivada localmente; sincronização pendente.`,ok?'ok':'warn',9000);
+}
 function exportExcel(){
  const audit=auditFileName();
  const rows=state.history.map(h=>({Data:brDate(h.finishedAt),Motorista:h.driverName,Placa:h.plate,Cavalo:h.horse,Tipologia:h.typology,Operação:h.operation,Doca:h.dock,HC:Number(h.hc||1),'Volumes previstos':h.expectedVolumes,'Volumes recebidos':h.receivedVolumes,Diferença:h.receivedVolumes-h.expectedVolumes,'Início':brDate(h.startedAt),'Fim':brDate(h.finishedAt),'Tempo (min)':h.durationMin,'Foto inicial':h.photoStartCode,'Foto final':h.photoEndCode,Observação:h.observation}));
