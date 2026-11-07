@@ -2523,7 +2523,7 @@ function reportGreeting(){
  return h>=5&&h<12?'Bom dia!':h>=12&&h<18?'Boa tarde!':'Boa noite!';
 }
 function reportCanvas(reportDate=productionViewDate()){
- const W=1200,H=2400,c=document.create('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
+ const W=1200,H=2400,c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
  x.fillStyle='#f4f7fb';x.fillRect(0,0,W,H);
  const box=(px,py,pw,ph,title)=>{x.fillStyle='#fff';x.strokeStyle='#dbe3ee';x.lineWidth=2;x.beginPath();x.roundRect(px,py,pw,ph,18);x.fill();x.stroke();x.fillStyle='#10204b';x.font='bold 28px Arial';x.fillText(title,px+22,py+38)};
  x.fillStyle='#10204b';x.font='bold 40px Arial';x.fillText('CRC • Report Operacional',45,58);
@@ -2597,14 +2597,25 @@ async function sharePanelsReport(){
   if(!blob)throw new Error('Não foi possível gerar a imagem.');
   const file=new File([blob],`CRC_Report_${reportDate}.png`,{type:'image/png'});
   const text=`${reportGreeting()}\n\nSegue Report da previsão ${brDate(reportDate)}.\n\nOperação: ${session?.operation||'Geral'}\nAtualizado em ${new Date().toLocaleString('pt-BR')}`;
-  if(navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){
-   await navigator.share({title:'CRC • Report Operacional',text,files:[file]});
-   return;
+  // Tenta o compartilhamento nativo. Se o navegador falhar ao anexar a imagem,
+  // faz o download e abre o WhatsApp como alternativa.
+  let shared=false;
+  if(typeof navigator.share==='function'){
+   try{
+    const canShareFiles=typeof navigator.canShare!=='function'||navigator.canShare({files:[file]});
+    if(canShareFiles){await navigator.share({title:'CRC • Report Operacional',text,files:[file]});shared=true;}
+   }catch(shareError){
+    if(shareError?.name==='AbortError')return;
+    console.warn('Compartilhamento nativo indisponível; usando alternativa.',shareError);
+   }
   }
-  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1200);
-  window.open(`https://wa.me/?text=${encodeURIComponent(text+'\\n\\nA imagem do report foi baixada no aparelho para anexar no WhatsApp.')}`,'_blank');
-  toast('Imagem do report gerada. Selecione o WhatsApp para compartilhar.','ok',7000);
- }catch(e){if(e?.name!=='AbortError'){console.error(e);toast('Não foi possível compartilhar o report: '+(e?.message||e),'error',8000)}}
+  if(shared)return;
+  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=file.name;a.style.display='none';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
+  const waUrl=`https://wa.me/?text=${encodeURIComponent(text+'\n\nA imagem do report foi baixada no aparelho. Anexe o arquivo '+file.name+' nesta conversa.')}`;
+  const waWindow=window.open(waUrl,'_blank');
+  if(!waWindow)toast('Relatório baixado. Anexe a imagem '+file.name+' no WhatsApp.','ok',9000);
+  else toast('Relatório baixado. O WhatsApp foi aberto; anexe a imagem baixada.','ok',9000);
+ }catch(e){if(e?.name!=='AbortError'){console.error(e);toast('Não foi possível gerar o report: '+(e?.message||e),'error',8000)}}
 }
 
 async function shareActiveStart(id){
