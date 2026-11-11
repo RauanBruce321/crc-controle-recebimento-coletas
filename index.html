@@ -1778,6 +1778,15 @@ function addPatioVehicle(e){
  state.patio.push({id:uid(),driverId:driver.id,driverName:name,plate,horse,typology,operation,arrivedAt:nowISO(),createdAt:nowISO(),updatedAt:nowISO()});
  log('Entrada no pátio',`${name} • ${plate}`,false);save(true);render();toast('Veículo adicionado ao pátio.','ok')
 }
+function receivingDefaultProductionDate(){
+ const dates=[...new Set(operationalPlanRows().map(p=>p.date).filter(Boolean))].sort();
+ if(dates.length===1)return dates[0];
+ const today=localDateKey();
+ if(dates.includes(today))return today;
+ const view=productionViewDate();
+ if(dates.includes(view))return view;
+ return dates.length?dates[dates.length-1]:today;
+}
 function renderReceiving(){
  return pageHead('Recebimento Operacional','Selecione o motorista, confirme a doca, registre a foto e inicie a descarga.','<button class="btn btn-primary" id="receivingNewDriver" type="button">+ Cadastrar motorista</button><button class="btn btn-primary" id="receivingEditDriver" type="button">Editar motorista</button><button class="btn btn-primary report-share-btn" id="sharePanelsReportBtn" type="button">📲 Compartilhar Report</button>')+
  `<div class="receiving-priority-strip"><div class="cards"><div class="kpi priority-kpi"><small>Prioridades</small><strong>${waitingPriorities().length}</strong><em>aguardando</em></div>${priorityCards()}</div></div><div class="panel"><div class="panel-title"><h3>Iniciar descarregamento</h3><span class="small">A doca fica bloqueada até a finalização</span></div>
@@ -1787,7 +1796,7 @@ function renderReceiving(){
  <div><label>Cavalo</label><input id="driverHorseView" placeholder="Automático — pode corrigir"></div>
  <div><label>Tipologia</label><input id="driverTypView" placeholder="Automático — pode corrigir"></div>
  <div><label>Doca</label><select id="dockSelect" required><option value="">Selecione...</option>${state.docks.filter(d=>d.status==='Livre').map(d=>`<option>${esc(d.number)}</option>`).join('')}</select></div>
- <div><label>Data da previsão / produção</label><input id="receivingProductionDate" type="date" value="${localDateKey()}" required><small class="small">Escolha a data da previsão a que este carro pertence.</small></div>
+ <div><label>Data da previsão / produção</label><input id="receivingProductionDate" type="date" value="${receivingDefaultProductionDate()}" required><small class="small">Escolha a data da previsão a que este carro pertence.</small></div>
  <div><label>Operação</label><input value="${esc(session.operation)}" class="readonly-field" readonly></div>
  <div><label>HC na doca</label><input id="hcCount" type="number" min="1" max="30" value="2" required></div>
  <div><label>Foto do veículo aberto</label><button id="openStartCameraBtn" class="btn btn-primary photo-button" type="button">📷 Abrir câmera</button><input id="startPhotoData" type="hidden"></div>
@@ -2586,38 +2595,58 @@ function reportCanvas(reportDate=productionViewDate()){
  return c;
 }
 async function sharePanelsReport(){
+ let waWindow=null;
  try{
-  const dates=[...new Set([...(state.plan||[]).map(p=>p.date),...state.active.map(a=>a.productionDate||localDateKey(a.startedAt)),...state.history.map(h=>h.productionDate||localDateKey(h.startedAt||h.finishedAt))].filter(Boolean))].sort();
-  if(!dates.length)return toast('Não há previsões ou movimentações para gerar relatório.','error');
-  const options=dates.map((d,i)=>`${i+1} — ${brDate(d)}`).join('\n');
-  let choice=dates[0];
-  if(dates.length>1){const answer=prompt('Qual previsão deseja enviar?\n\n'+options+'\n\nDigite o número da opção:');if(answer===null)return;const index=Number(answer)-1;if(!Number.isInteger(index)||index<0||index>=dates.length)return toast('Opção inválida. Gere o relatório novamente e escolha uma previsão da lista.','error');choice=dates[index];}
-  const reportDate=choice;
+  // A escolha da previsão considera primeiro as datas realmente lançadas.
+  // Histórico de outro dia não cria uma falsa segunda opção.
+  const planDates=[...new Set(operationalPlanRows().map(p=>p.date).filter(Boolean))].sort();
+  const activeDates=[...new Set((state.active||[]).map(a=>a.productionDate||localDateKey(a.startedAt)).filter(Boolean))].sort();
+  const historyDates=[...new Set((state.history||[]).map(h=>h.productionDate||localDateKey(h.startedAt||h.finishedAt)).filter(Boolean))].sort();
+  const dates=planDates.length?planDates:(activeDates.length?activeDates:historyDates);
+  if(!dates.length)return toast('Não há previsão ou movimentação para gerar relatório.','error');
+  let reportDate=dates[0];
+  if(dates.length>1){
+   const options=dates.map((d,i)=>`${i+1} — ${brDate(d)}`).join('\n');
+   const answer=prompt('Qual previsão deseja enviar?\n\n'+options+'\n\nDigite o número da opção:');
+   if(answer===null)return;
+   const index=Number(answer)-1;
+   if(!Number.isInteger(index)||index<0||index>=dates.length)return toast('Opção inválida. Gere o relatório novamente e escolha uma previsão da lista.','error');
+   reportDate=dates[index];
+  }
+  // Abre a aba do WhatsApp durante o clique, antes de qualquer await,
+  // para evitar bloqueio de pop-up em navegadores desktop.
+  try{waWindow=window.open('about:blank','_blank')}catch(_){}
   const canvas=reportCanvas(reportDate),blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png',0.95));
   if(!blob)throw new Error('Não foi possível gerar a imagem.');
   const file=new File([blob],`CRC_Report_${reportDate}.png`,{type:'image/png'});
   const text=`${reportGreeting()}\n\nSegue Report da previsão ${brDate(reportDate)}.\n\nOperação: ${session?.operation||'Geral'}\nAtualizado em ${new Date().toLocaleString('pt-BR')}`;
-  // Tenta o compartilhamento nativo. Se o navegador falhar ao anexar a imagem,
-  // faz o download e abre o WhatsApp como alternativa.
-  let shared=false;
+  // No celular, oferece o compartilhamento nativo com o arquivo anexado.
   if(typeof navigator.share==='function'){
    try{
     const canShareFiles=typeof navigator.canShare!=='function'||navigator.canShare({files:[file]});
-    if(canShareFiles){await navigator.share({title:'CRC • Report Operacional',text,files:[file]});shared=true;}
+    if(canShareFiles){
+     await navigator.share({title:'CRC • Report Operacional',text,files:[file]});
+     if(waWindow&&!waWindow.closed)waWindow.close();
+     return;
+    }
    }catch(shareError){
-    if(shareError?.name==='AbortError')return;
-    console.warn('Compartilhamento nativo indisponível; usando alternativa.',shareError);
+    if(shareError?.name==='AbortError'){if(waWindow&&!waWindow.closed)waWindow.close();return;}
+    console.warn('Compartilhamento nativo indisponível; usando alternativa WhatsApp.',shareError);
    }
   }
-  if(shared)return;
-  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=file.name;a.style.display='none';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
-  const waUrl=`https://wa.me/?text=${encodeURIComponent(text+'\n\nA imagem do report foi baixada no aparelho. Anexe o arquivo '+file.name+' nesta conversa.')}`;
-  const waWindow=window.open(waUrl,'_blank');
-  if(!waWindow)toast('Relatório baixado. Anexe a imagem '+file.name+' no WhatsApp.','ok',9000);
-  else toast('Relatório baixado. O WhatsApp foi aberto; anexe a imagem baixada.','ok',9000);
- }catch(e){if(e?.name!=='AbortError'){console.error(e);toast('Não foi possível gerar o report: '+(e?.message||e),'error',8000)}}
+  // Desktop: baixa a imagem e deixa o WhatsApp aberto com a legenda pronta.
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=file.name;a.style.display='none';document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),15000);
+  const waUrl=`https://wa.me/?text=${encodeURIComponent(text+'\n\nO relatório foi baixado como '+file.name+'. Anexe essa imagem nesta conversa do WhatsApp.')}`;
+  if(waWindow&&!waWindow.closed){waWindow.location.href=waUrl;}
+  else {const opened=window.open(waUrl,'_blank');if(!opened)toast('Relatório baixado. Abra o WhatsApp e anexe a imagem '+file.name+'.','ok',10000);}
+  toast(`Relatório da previsão ${brDate(reportDate)} baixado. O WhatsApp foi aberto com a mensagem pronta; anexe a imagem.`, 'ok',10000);
+ }catch(e){
+  if(waWindow&&!waWindow.closed)waWindow.close();
+  if(e?.name!=='AbortError'){console.error(e);toast('Não foi possível gerar o report: '+(e?.message||e),'error',8000)}
+ }
 }
-
 async function shareActiveStart(id){
  const a=state.active.find(x=>x.id===id);if(!a)return toast('Foto inicial não encontrada.','error');
  try{
@@ -3017,6 +3046,14 @@ function turnDbStatus(item){
 
 function currentCycleEpoch(){return Math.max(0,Number(state?.meta?.resetEpoch||0))}
 function rowCycleEpoch(row){const n=Number(row?.dados?._crc_cycle_epoch||0);return Number.isFinite(n)?n:0}
+function rowEntityEpoch(row){
+ const stored=Number(row?.dados?._crc_entity_epoch||0);
+ if(Number.isFinite(stored)&&stored>0)return stored;
+ const item=row?.dados||{};
+ const raw=item.updatedAt||item.finishedAt||item.cancelledAt||item.attendedAt||item.startedAt||item.arrivedAt||item.createdAt||0;
+ const parsed=Date.parse(raw)||Number(raw)||0;
+ return Number.isFinite(parsed)&&parsed>0?parsed:0;
+}
 function entityMutationEpoch(item){
  const raw=item?.updatedAt||item?.finishedAt||item?.cancelledAt||item?.attendedAt||item?.startedAt||item?.arrivedAt||item?.createdAt||0;
  const t=Date.parse(raw)||Number(raw)||0;return Number.isFinite(t)&&t>0?t:Date.now()
@@ -3056,14 +3093,14 @@ async function resetOperationalCycleServer(){
  return confirmed
 }
 
-function cloudRowFor(kind,item){
+function cloudRowFor(kind,item,cycleEpoch=currentCycleEpoch()){
  const dados=cloneCRC(item||{});
  // Fotos nunca trafegam dentro de dados/Realtime. Apenas o caminho no Storage.
  if(dados&&typeof dados==='object'){
   delete dados.startPhoto;
   delete dados.endPhoto;
  }
- dados._crc_cycle_epoch=currentCycleEpoch();
+ dados._crc_cycle_epoch=Number(cycleEpoch||0);
  dados._crc_entity_epoch=entityMutationEpoch(item);
  if(kind==='patio'||kind==='active')dados._crc_kind=kind;
  const code=String(item?.id||'');
@@ -3224,7 +3261,7 @@ function applyNormalizedRealtime(kind,payload){
  const remoteRowEpoch=rowCycleEpoch(row),localEpoch=currentCycleEpoch();
  // DELETE deve sempre ser aceito. INSERT/UPDATE sem epoch (0) é considerado antigo
  // assim que já existe um ciclo oficial > 0.
- if(event!=='DELETE'&&localEpoch>0&&remoteRowEpoch<localEpoch)return;
+ if(event!=='DELETE'&&localEpoch>0&&(remoteRowEpoch<localEpoch||rowEntityEpoch(row)<localEpoch))return;
  if(event!=='DELETE'&&remoteRowEpoch>localEpoch){scheduleCloudPull(0);return}
  const item=stripCloudMeta(row?.dados||{});
  const id=String(item?.id||rawVehicleId||'');
@@ -3391,7 +3428,12 @@ async function pullCloud(force=false){
   for(const [kind,table] of Object.entries(CRC_NORMALIZED_TABLES)){
    let rows=tableRows[table]||[];
    const cycleBound=!['crc_motoristas','crc_docas'].includes(table);
-   if(cycleBound)rows=rows.filter(r=>rowCycleEpoch(r)>=Number(next.meta?.resetEpoch||0));
+   if(cycleBound){
+    const epoch=Number(next.meta?.resetEpoch||0);
+    // Além do marcador do ciclo, confere a data original do próprio registro.
+    // Isso descarta dados antigos republicados por uma aba/aparelho desatualizado.
+    rows=rows.filter(r=>rowCycleEpoch(r)>=epoch&&rowEntityEpoch(r)>=epoch);
+   }
    if(table==='crc_veiculos')rows=rows.filter(r=>kindFromVehicleRow(r)===kind);
    const mapped=rows.map(row=>{
     const item=stripCloudMeta(row.dados||{});
@@ -3434,6 +3476,17 @@ async function syncCloud(silent=false){
  syncInFlight=true;
  const beforeSync=cloneCRC(syncBaseState||state);
  try{
+  // BLOQUEIO DE CICLO ANTIGO: nenhum aparelho pode republicar dados apagados
+  // depois que outro administrador confirmou o zeramento no Supabase.
+  const officialControl=await fetchCycleControl();
+  const officialEpoch=Number(officialControl.resetEpoch||0),localEpoch=currentCycleEpoch();
+  if(officialEpoch!==localEpoch){
+   if(officialEpoch>localEpoch)applyCycleResetLocal(officialEpoch,{user:officialControl.user||'Administrativo',refresh:false,notify:false});
+   else await pullCloud(true);
+   if(!silent)toast('A sincronização foi bloqueada porque este aparelho estava em um ciclo diferente. Os dados oficiais foram atualizados.','warn',9500);
+   return false;
+  }
+  const syncEpoch=localEpoch;
   enforceDefaultAccessAndDedupe();
   const base=syncBaseState?cloneCRC(syncBaseState):normalizeStateShape(cloneCRC(seed()));
   const delta=buildStateDelta(base,state);
@@ -3441,7 +3494,7 @@ async function syncCloud(silent=false){
 
   for(const [kind,items] of Object.entries(delta.upserts||{})){
    const table=CRC_NORMALIZED_TABLES[kind];if(!table||!items?.length)continue;
-   const rows=items.map(item=>cloudRowFor(kind,item));
+   const rows=items.map(item=>cloudRowFor(kind,item,syncEpoch));
    const options={onConflict:conflictColumnFor(kind)};
    if(kind==='history')options.ignoreDuplicates=true;
    const {error}=await supabaseClient.from(table).upsert(rows,options);
