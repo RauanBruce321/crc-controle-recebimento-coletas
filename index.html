@@ -1161,7 +1161,21 @@ async function applyManualNoShow(e){
 
 function productionViewDate(){
  state.meta=state.meta||{};
- return state.meta.productionViewDate||localDateKey();
+ const dates=[...new Set(operationalPlanRows().map(p=>p.date).filter(Boolean))].sort();
+ const selected=state.meta.productionViewDate;
+ // Mantém a data escolhida quando ela ainda possui previsão.
+ if(selected&&(!dates.length||dates.includes(selected)))return selected;
+ // Com uma única previsão, ela é sempre a data operacional padrão.
+ if(dates.length===1){state.meta.productionViewDate=dates[0];return dates[0];}
+ // Com duas ou mais previsões, preserva a data de ciclo válida; se não houver,
+ // seleciona a mais recente para evitar cards zerados em uma data sem previsão.
+ if(dates.length>1){
+  const cycle=state.meta.cyclePlanDate;
+  const fallback=cycle&&dates.includes(cycle)?cycle:dates[dates.length-1];
+  state.meta.productionViewDate=fallback;
+  return fallback;
+ }
+ return selected||localDateKey();
 }
 function setProductionViewDate(date){
  if(!date)return;
