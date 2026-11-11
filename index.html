@@ -2627,25 +2627,41 @@ async function sharePanelsReport(){
    if(!Number.isInteger(index)||index<0||index>=dates.length)return toast('Opção inválida. Gere o relatório novamente e escolha uma previsão da lista.','error');
    reportDate=dates[index];
   }
-  // Abre a aba do WhatsApp durante o clique, antes de qualquer await,
-  // para evitar bloqueio de pop-up em navegadores desktop.
-  try{waWindow=window.open('about:blank','_blank')}catch(_){}
+  const isMobileReport=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');
+  // Desktop: reserva a aba do WhatsApp durante o clique para evitar bloqueio de pop-up.
+  if(!isMobileReport){try{waWindow=window.open('about:blank','_blank')}catch(_){}}
   const canvas=reportCanvas(reportDate),blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png',0.95));
   if(!blob)throw new Error('Não foi possível gerar a imagem.');
   const file=new File([blob],`CRC_Report_${reportDate}.png`,{type:'image/png'});
   const text=`${reportGreeting()}\n\nSegue Report da previsão ${brDate(reportDate)}.\n\nOperação: ${session?.operation||'Geral'}\nAtualizado em ${new Date().toLocaleString('pt-BR')}`;
-  // No celular, oferece o compartilhamento nativo com o arquivo anexado.
-  if(typeof navigator.share==='function'){
-   try{
-    const canShareFiles=typeof navigator.canShare!=='function'||navigator.canShare({files:[file]});
-    if(canShareFiles){
-     await navigator.share({title:'CRC • Report Operacional',text,files:[file]});
-     if(waWindow&&!waWindow.closed)waWindow.close();
-     return;
-    }
-   }catch(shareError){
-    if(shareError?.name==='AbortError'){if(waWindow&&!waWindow.closed)waWindow.close();return;}
-    console.warn('Compartilhamento nativo indisponível; usando alternativa WhatsApp.',shareError);
+  // No celular, a geração do PNG é assíncrona e pode consumir a autorização
+  // do clique original. Por isso, pede um segundo toque e chama navigator.share
+  // diretamente dentro desse novo evento, enviando imagem e legenda juntos.
+  if(isMobileReport&&typeof navigator.share==='function'){
+   const canShareFiles=typeof navigator.canShare!=='function'||navigator.canShare({files:[file]});
+   if(canShareFiles){
+    const overlay=document.createElement('div');
+    overlay.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.72);display:flex;align-items:center;justify-content:center;padding:20px;';
+    const panel=document.createElement('div');
+    panel.style.cssText='width:min(420px,100%);background:#fff;border-radius:16px;padding:22px;box-shadow:0 15px 50px rgba(0,0,0,.3);text-align:center;color:#10204b;';
+    const title=document.createElement('div');title.textContent='Relatório pronto';title.style.cssText='font-size:19px;font-weight:800;margin-bottom:8px;';
+    const desc=document.createElement('div');desc.textContent='Toque abaixo para compartilhar a imagem e a legenda juntas. Depois escolha WhatsApp.';desc.style.cssText='font-size:14px;line-height:1.45;margin-bottom:18px;';
+    const shareBtn=document.createElement('button');shareBtn.type='button';shareBtn.textContent='📲 Compartilhar imagem e texto';shareBtn.style.cssText='width:100%;border:0;border-radius:10px;padding:14px 12px;background:#16a34a;color:#fff;font-size:15px;font-weight:800;';
+    const cancelBtn=document.createElement('button');cancelBtn.type='button';cancelBtn.textContent='Cancelar';cancelBtn.style.cssText='margin-top:10px;border:0;background:transparent;color:#64748b;padding:10px;font-size:14px;';
+    shareBtn.addEventListener('click',()=>{
+     // A chamada ocorre imediatamente no gesto do usuário, sem await anterior.
+     let sharePromise;
+     try{sharePromise=navigator.share({title:'CRC • Report Operacional',text,files:[file]});}
+     catch(shareError){overlay.remove();console.warn('Falha no compartilhamento nativo.',shareError);return toast('Não foi possível compartilhar pelo menu do celular. Tente novamente.','error',8000);}
+     shareBtn.disabled=true;shareBtn.textContent='Abrindo compartilhamento…';
+     sharePromise.then(()=>overlay.remove()).catch(shareError=>{
+      overlay.remove();
+      if(shareError?.name!=='AbortError'){console.warn('Compartilhamento nativo indisponível.',shareError);toast('O aparelho não concluiu o compartilhamento. Tente novamente.','error',8000);}
+     });
+    });
+    cancelBtn.addEventListener('click',()=>overlay.remove());
+    panel.append(title,desc,shareBtn,cancelBtn);overlay.appendChild(panel);document.body.appendChild(overlay);
+    return;
    }
   }
   // Desktop: baixa a imagem e deixa o WhatsApp aberto com a legenda pronta.
