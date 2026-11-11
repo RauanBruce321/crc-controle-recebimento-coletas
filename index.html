@@ -2630,16 +2630,17 @@ async function sharePanelsReport(){
   const isMobileReport=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');
   // Desktop: reserva a aba do WhatsApp durante o clique para evitar bloqueio de pop-up.
   if(!isMobileReport){try{waWindow=window.open('about:blank','_blank')}catch(_){}}
-  const canvas=reportCanvas(reportDate),blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png',0.95));
+  const canvas=reportCanvas(reportDate),blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.92));
   if(!blob)throw new Error('Não foi possível gerar a imagem.');
-  const file=new File([blob],`CRC_Report_${reportDate}.png`,{type:'image/png'});
+  const file=new File([blob],`CRC_Report_${reportDate}.jpg`,{type:'image/jpeg'});
   const text=`${reportGreeting()}\n\nSegue Report da previsão ${brDate(reportDate)}.\n\nOperação: ${session?.operation||'Geral'}\nAtualizado em ${new Date().toLocaleString('pt-BR')}`;
   // No celular, a geração do PNG é assíncrona e pode consumir a autorização
   // do clique original. Por isso, pede um segundo toque e chama navigator.share
   // diretamente dentro desse novo evento, enviando imagem e legenda juntos.
   if(isMobileReport&&typeof navigator.share==='function'){
-   const canShareFiles=typeof navigator.canShare!=='function'||navigator.canShare({files:[file]});
-   if(canShareFiles){
+   // Alguns WebViews/PWAs retornam false em canShare mesmo aceitando o File
+   // no share real. Tentamos o compartilhamento de arquivo diretamente.
+   {
     const overlay=document.createElement('div');
     overlay.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.72);display:flex;align-items:center;justify-content:center;padding:20px;';
     const panel=document.createElement('div');
